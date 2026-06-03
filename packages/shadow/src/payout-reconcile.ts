@@ -1,4 +1,5 @@
 import {
+  isImpossibleFlatPnl,
   markToMarketPnl,
   pnlForCloseLeg,
   roiFromPnl,
@@ -81,10 +82,7 @@ export function recomputeClosedPayout(
     });
   }
 
-  const flatMismatch =
-    Math.abs(exitPrice - entryPrice) < 1e-9 && Math.abs(realizedPnl) > 0.01;
-
-  if (flatMismatch) {
+  if (isImpossibleFlatPnl(entryPrice, exitPrice, input.storedRealizedPnl)) {
     return {
       realizedPnl: 0,
       roi: 0,

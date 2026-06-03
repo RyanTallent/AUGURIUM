@@ -87,7 +87,8 @@ export async function computeLiveTradingReadiness(): Promise<LiveTradingReadines
   const blockers: string[] = [];
   const warnings: string[] = [];
 
-  const roiAnomalyCount = forensics.corruptTradeCount;
+  /** Anomalies among analytics-eligible rows only (invalid rows excluded). */
+  const roiAnomalyCount = shadow.corruptRoiCount;
   const shadowPayoutAuditPass =
     impossiblePnl === 0 && payoutAudit.impossiblePnlCount === 0;
 

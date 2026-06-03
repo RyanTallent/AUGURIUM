@@ -88,6 +88,7 @@ export {
 } from "./production-maintenance.js";
 export {
   cleanupDuplicateShadows,
+  fixImpossibleFlatPnl,
   reconcileShadowPayouts,
 } from "./maintenance-repairs.js";
 export {

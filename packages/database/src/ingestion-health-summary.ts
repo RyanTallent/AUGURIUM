@@ -30,10 +30,16 @@ export async function computeIngestionHealthSummary(): Promise<IngestionHealthSu
   const [failedRuns24h, failedRuns7d, staleRunningRuns, cursors, recentFailures] =
     await Promise.all([
       prisma.ingestionRun.count({
-        where: { status: "failed", startedAt: { gte: since24h } },
+        where: {
+          status: { in: ["failed", "error"] },
+          startedAt: { gte: since24h },
+        },
       }),
       prisma.ingestionRun.count({
-        where: { status: "failed", startedAt: { gte: since7d } },
+        where: {
+          status: { in: ["failed", "error"] },
+          startedAt: { gte: since7d },
+        },
       }),
       prisma.ingestionRun.count({
         where: { status: "running", startedAt: { lt: staleCutoff } },
@@ -69,7 +75,9 @@ export async function computeIngestionHealthSummary(): Promise<IngestionHealthSu
 
   const notes: string[] = [];
   if (failedRuns24h > 0) {
-    notes.push(`${failedRuns24h} ingestion run(s) failed in the last 24h`);
+    notes.push(
+      `${failedRuns24h} ingestion run(s) failed in the last 24h (historical; new pagination exhaustion resets do not increment this)`,
+    );
   }
   if (staleRunningRuns > 0) {
     notes.push(`${staleRunningRuns} run(s) stuck in running >30m`);

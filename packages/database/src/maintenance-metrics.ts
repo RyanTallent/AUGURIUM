@@ -59,7 +59,7 @@ export async function collectMaintenanceMetrics(): Promise<MaintenanceMetricsSna
     }),
     prisma.ingestionRun.count({
       where: {
-        status: "failed",
+        status: { in: ["failed", "error"] },
         startedAt: { gte: since24h },
       },
     }),

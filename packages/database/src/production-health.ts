@@ -152,7 +152,10 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
       },
     }),
     prisma.ingestionRun.count({
-      where: { status: "failed", startedAt: { gte: since24h } },
+      where: {
+        status: { in: ["failed", "error"] },
+        startedAt: { gte: since24h },
+      },
     }),
     getLastWorkerMemoryFromRuns(),
   ]);

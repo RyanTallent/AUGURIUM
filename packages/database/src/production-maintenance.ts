@@ -9,6 +9,7 @@ import {
 } from "./maintenance-status.js";
 import {
   cleanupDuplicateShadows,
+  fixImpossibleFlatPnl,
   reconcileShadowPayouts,
 } from "./maintenance-repairs.js";
 import {
@@ -105,6 +106,12 @@ export async function runProductionMaintenance(
   });
 
   try {
+    steps.push({
+      name: "fix_impossible_flat_pnl",
+      status: dryRun ? "dry_run" : "ok",
+      detail: { ...(await fixImpossibleFlatPnl(dryRun)) },
+    });
+
     steps.push({
       name: "orphan_shadow_runs",
       status: dryRun ? "dry_run" : "ok",

@@ -49,8 +49,7 @@ export function markToMarketPnl(input: PayoutLegInput): number {
   const shares = computeShares(costBasis, entryPrice) * positionFraction;
   if (shares <= 0) return 0;
 
-  const flat = Math.abs(exitPrice - entryPrice) < 1e-9;
-  if (flat) return 0;
+  if (pricesEffectivelyEqual(entryPrice, exitPrice)) return 0;
 
   if (isNoSide(outcomeSide)) {
     return (entryPrice - exitPrice) * shares;
@@ -104,6 +103,21 @@ export function partialTriggerPrice(entryPrice: number, outcomeSide: string): nu
 }
 
 const PRICE_EPS = 1e-9;
+
+/** Entry and exit are the same price within float/display tolerance. */
+export function pricesEffectivelyEqual(entryPrice: number, exitPrice: number): boolean {
+  if (!Number.isFinite(entryPrice) || !Number.isFinite(exitPrice)) return false;
+  const scale = Math.max(1, Math.abs(entryPrice), Math.abs(exitPrice));
+  return Math.abs(exitPrice - entryPrice) <= Math.max(PRICE_EPS, scale * 1e-6);
+}
+
+export function isImpossibleFlatPnl(
+  entryPrice: number,
+  exitPrice: number,
+  realizedPnl: number,
+): boolean {
+  return pricesEffectivelyEqual(entryPrice, exitPrice) && Math.abs(realizedPnl) > 0.01;
+}
 
 export function priceHitsPartialTarget(
   entryPrice: number,
@@ -238,7 +252,7 @@ export function validateClosedPayout(input: {
     };
   }
 
-  const flat = Math.abs(exitPrice - entryPrice) < 1e-9;
+  const flat = pricesEffectivelyEqual(entryPrice, exitPrice);
   const formula = input.formula ?? "mark_to_market";
 
   let expected = input.priorRealizedPnl;

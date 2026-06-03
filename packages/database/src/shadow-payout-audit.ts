@@ -1,6 +1,7 @@
 import { prisma } from "./client.js";
 import {
   closedPositionRoi,
+  isImpossibleFlatPnl,
   recomputeClosedPayout,
   parseCloseReasonFromReasoning,
   validateClosedPayout,
@@ -69,8 +70,7 @@ export async function computeShadowPayoutAudit(limit = 100): Promise<ShadowPayou
       storedRealizedPnl: t.realizedPnl,
     });
 
-    const flatBad =
-      Math.abs(exitPrice - entryPrice) < 1e-9 && Math.abs(t.realizedPnl) > 0.01;
+    const flatBad = isImpossibleFlatPnl(entryPrice, exitPrice, t.realizedPnl);
     if (flatBad) impossiblePnlCount++;
 
     const authRoi = closedPositionRoi(t.realizedPnl, costBasis);
@@ -140,9 +140,7 @@ export async function countImpossiblePnl(): Promise<number> {
       realizedPnl: true,
     },
   });
-  return trades.filter(
-    (t) =>
-      Math.abs(t.currentPrice - t.simulatedEntryPrice) < 1e-9 &&
-      Math.abs(t.realizedPnl) > 0.01,
+  return trades.filter((t) =>
+    isImpossibleFlatPnl(t.simulatedEntryPrice, t.currentPrice, t.realizedPnl),
   ).length;
 }

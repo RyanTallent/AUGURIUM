@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   classifyInvalidForAnalytics,
+  isImpossibleFlatPnl,
   markToMarketPnl,
   maxPossibleRoi,
   priceHitsRunnerTarget,
+  pricesEffectivelyEqual,
   resolvedLoserPnl,
   resolvedWinnerPnl,
   roiFromPnl,
@@ -12,6 +14,13 @@ import {
 } from "./payout.js";
 import { applyAuguriumExitRules, computePositionMetrics } from "./exit-rules.js";
 import { recomputeClosedPayout } from "./payout-reconcile.js";
+
+describe("pricesEffectivelyEqual", () => {
+  it("treats near-equal prices as flat", () => {
+    assert.ok(pricesEffectivelyEqual(0.025, 0.0250000001));
+    assert.ok(isImpossibleFlatPnl(0.025, 0.025, 100));
+  });
+});
 
 describe("markToMarketPnl", () => {
   it("entry == exit gives PnL 0", () => {

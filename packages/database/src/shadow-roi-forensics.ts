@@ -63,7 +63,9 @@ export async function computeShadowRoiForensics(
     orderBy: { closedAt: "desc" },
   });
 
-  const rows: ShadowTradeForensicRow[] = trades.map((t) => {
+  const eligible = trades.filter((t) => !t.invalidForAnalytics);
+
+  const rows: ShadowTradeForensicRow[] = eligible.map((t) => {
     const costBasis = t.simulatedSizeUsd;
     const authoritativeRoi = closedPositionRoi(t.realizedPnl, costBasis);
     const exitPrice = t.currentPrice;
@@ -126,7 +128,7 @@ export async function computeShadowRoiForensics(
     .slice(0, 25);
 
   return {
-    sampleSize: rows.length,
+    sampleSize: eligible.length,
     anomalyBuckets,
     corruptTradeCount: summary.corruptCount,
     meanStoredRoi: mean(storedRois),

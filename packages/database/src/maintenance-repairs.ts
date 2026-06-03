@@ -1,8 +1,52 @@
 import { prisma } from "./client.js";
 import {
+  isImpossibleFlatPnl,
   parseCloseReasonFromReasoning,
   recomputeClosedPayout,
 } from "@augurium/shadow";
+
+export interface ImpossibleFlatPnlFixResult {
+  examined: number;
+  fixed: number;
+  dryRun: boolean;
+}
+
+/** Provably flat entry≈exit with nonzero PnL → zero out (no fabricated prices). */
+export async function fixImpossibleFlatPnl(
+  dryRun: boolean,
+): Promise<ImpossibleFlatPnlFixResult> {
+  const trades = await prisma.shadowTrade.findMany({
+    where: { status: { in: ["CLOSED", "EXPIRED"] } },
+    select: {
+      id: true,
+      simulatedEntryPrice: true,
+      currentPrice: true,
+      realizedPnl: true,
+    },
+  });
+
+  let fixed = 0;
+  for (const t of trades) {
+    if (!isImpossibleFlatPnl(t.simulatedEntryPrice, t.currentPrice, t.realizedPnl)) {
+      continue;
+    }
+    if (!dryRun) {
+      await prisma.shadowTrade.update({
+        where: { id: t.id },
+        data: {
+          realizedPnl: 0,
+          roi: 0,
+          payoutFormula: "mark_to_market",
+          payoutDiagnostic: "entry_equals_exit_corrected",
+          invalidForAnalytics: false,
+        },
+      });
+    }
+    fixed++;
+  }
+
+  return { examined: trades.length, fixed, dryRun };
+}
 
 export interface DuplicateCleanupResult {
   groupsAffected: number;
