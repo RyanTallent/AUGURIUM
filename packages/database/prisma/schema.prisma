@@ -8,83 +8,626 @@ datasource db {
 }
 
 model Market {
-  id          String   @id @default(cuid())
-  externalId  String   @unique
-  source      String   @default("polymarket")
-  title       String
-  slug        String?
-  category    String?
-  endDate     DateTime?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String    @id @default(cuid())
+  externalId       String    @unique
+  conditionId      String?   @unique
+  eventExternalId  String?
+  eventSlug        String?
+  source           String    @default("polymarket")
+  title            String
+  slug             String?
+  category         String?
+  endDate          DateTime?
+  active           Boolean   @default(true)
+  closed           Boolean   @default(false)
+  resolved         Boolean   @default(false)
+  resolutionStatus String?
+  acceptingOrders  Boolean?
+  clobTokenIds     String[]  @default([])
+  marketQualityScore Float?
+  lastAlphaScore     Float?
+  lastConsensusScore Float?
+  lastSignalType     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  positions Position[]
-  signals   Signal[]
+  positions            Position[]
+  signals              Signal[]
+  trades               Trade[]
+  shadowTrades         ShadowTrade[]
+  portfolioPositions   PortfolioPosition[]
+  portfolioDecisions   PortfolioDecision[]
+  executionOrders      ExecutionOrder[]
+  executionPositions   ExecutionPosition[]
 }
 
 model Trader {
-  id        String   @id @default(cuid())
-  address   String   @unique
-  label     String?
-  score     Float    @default(0)
-  winRate   Float    @default(0)
-  roi       Float    @default(0)
-  trades    Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String    @id @default(cuid())
+  address        String    @unique
+  label          String?
+  pseudonym      String?
+  discoveredVia  String?
+  firstSeenAt    DateTime  @default(now())
+  lastActivityAt DateTime?
+  score          Float     @default(0)
+  winRate        Float     @default(0)
+  roi            Float     @default(0)
+  trades         Int       @default(0)
+  tier           String    @default("UNRANKED")
+  rankingScore   Float     @default(0)
+  copyabilityScore       Float @default(0)
+  estimatedCopiedRoi     Float @default(0)
+  informationEdgeScore   Float @default(0)
+  confidenceScore        Float @default(0)
+  recentFormScore        Float @default(0)
+  bestCategory           String?
+  lowConfidence          Boolean @default(true)
+  lastScoredAt           DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  positions Position[]
+  positions            Position[]
+  tradeRows            Trade[]
+  metricsSnapshots     TraderMetricsSnapshot[]
+  scoreHistory         TraderScoreHistory[]
+  tierHistory          TraderTierHistory[]
+}
+
+model TraderMetricsSnapshot {
+  id        String   @id @default(cuid())
+  traderId  String
+  capturedAt DateTime @default(now())
+
+  tradeCount           Int
+  marketCount          Int
+  totalVolume          Float
+  firstSeen            DateTime?
+  lastSeen             DateTime?
+  activeDays           Int
+  averageTradeSize     Float
+  averagePositionSize  Float
+  realizedPnl          Float
+  unrealizedPnl        Float
+  estimatedTotalPnl    Float
+  roi                  Float
+  winRate              Float
+  lossRate             Float
+  averageWin           Float
+  averageLoss          Float
+  profitFactor         Float
+  maxDrawdown          Float
+  consistencyScore     Float
+  roi7d                Float
+  roi30d               Float
+  roi90d               Float
+  roi180d              Float
+  volume7d             Float
+  volume30d            Float
+  tradeCount7d         Int
+  tradeCount30d        Int
+  copyabilityScore     Float
+  estimatedCopiedRoi   Float
+  averageSlippageEstimate Float
+  averageExecutionDelayEstimate Float
+  mirrorabilityScore   Float
+  copiedProfitFactor   Float
+  informationEdgeScore Float
+  confidenceScore      Float
+  recentFormScore      Float
+  rankingScore         Float
+  tier                 String
+  bestCategory         String?
+  specialistCategory   String?
+  specialistScore      Float
+  lowConfidence        Boolean @default(true)
+  skipReason           String?
+
+  trader           Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+  categoryMetrics  TraderCategoryMetric[]
+
+  @@index([traderId, capturedAt])
+  @@index([rankingScore])
+  @@index([tier])
+}
+
+model TraderCategoryMetric {
+  id               String @id @default(cuid())
+  snapshotId       String
+  category         String
+  tradeCount       Int
+  volume           Float
+  roi              Float
+  winRate          Float
+  specialistScore  Float
+
+  snapshot TraderMetricsSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId])
+  @@index([category])
+}
+
+model TraderScoreHistory {
+  id                   String   @id @default(cuid())
+  traderId             String
+  capturedAt           DateTime @default(now())
+  rankingScore         Float
+  copyabilityScore     Float
+  estimatedCopiedRoi   Float
+  informationEdgeScore Float
+  confidenceScore      Float
+  consistencyScore     Float
+  recentFormScore      Float
+  rawRoi               Float
+
+  trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  @@index([traderId, capturedAt])
+}
+
+model TraderTierHistory {
+  id           String   @id @default(cuid())
+  traderId     String
+  tier         String
+  rankingScore Float
+  capturedAt   DateTime @default(now())
+
+  trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  @@index([traderId, capturedAt])
+}
+
+model Trade {
+  id              String   @id @default(cuid())
+  externalKey     String   @unique
+  traderId        String
+  marketId        String?
+  conditionId     String
+  transactionHash String
+  asset           String
+  side            String
+  outcome         String?
+  slug            String?
+  eventSlug       String?
+  size            Float
+  price           Float
+  tradedAt        DateTime
+  source          String   @default("global-trades")
+  rawPayloadId    String?
+  createdAt       DateTime @default(now())
+
+  trader     Trader          @relation(fields: [traderId], references: [id])
+  market     Market?         @relation(fields: [marketId], references: [id])
+  rawPayload RawApiPayload?  @relation(fields: [rawPayloadId], references: [id])
+
+  @@index([traderId, tradedAt])
+  @@index([conditionId])
+  @@index([marketId])
+  @@index([transactionHash])
+  @@index([tradedAt])
 }
 
 model Position {
-  id        String   @id @default(cuid())
-  traderId  String
-  marketId  String
-  side      String
-  size      Float
-  avgPrice  Float
-  pnl       Float    @default(0)
-  openedAt  DateTime @default(now())
-  closedAt  DateTime?
+  id           String    @id @default(cuid())
+  traderId     String
+  marketId     String
+  conditionId  String
+  asset        String?
+  side         String
+  size         Float
+  avgPrice     Float
+  pnl          Float     @default(0)
+  source       String    @default("api")
+  status       String    @default("open")
+  externalKey  String    @unique
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  syncedAt     DateTime  @default(now())
 
   trader Trader @relation(fields: [traderId], references: [id])
   market Market @relation(fields: [marketId], references: [id])
 
   @@index([traderId])
   @@index([marketId])
+  @@index([status])
 }
 
 model Signal {
-  id         String   @id @default(cuid())
-  marketId   String
-  side       String
-  confidence Float
-  rationale  String
-  status     String   @default("active")
-  createdAt  DateTime @default(now())
+  id                    String    @id @default(cuid())
+  marketId              String
+  conditionId           String?
+  side                  String
+  outcome               String?
+  signalType            String    @default("IGNORE")
+  consensusScore        Float     @default(0)
+  alphaScore            Float     @default(0)
+  marketQualityScore    Float     @default(0)
+  systemConfidenceScore Float     @default(0)
+  copyabilityScore      Float     @default(0)
+  informationEdgeScore  Float     @default(0)
+  convictionScore       Float     @default(0)
+  disagreementScore     Float     @default(0)
+  triggerTradeIds       String[]  @default([])
+  triggerTraderWallets  String[]  @default([])
+  reasoning             String    @default("")
+  confidence            Float     @default(0)
+  rationale             String    @default("")
+  status                String    @default("active")
+  createdAt             DateTime  @default(now())
+  expiresAt             DateTime?
 
-  market Market @relation(fields: [marketId], references: [id])
+  market            Market              @relation(fields: [marketId], references: [id])
+  shadowTrade       ShadowTrade?
+  replaySnapshots   ReplaySnapshot[]
+  portfolioPosition PortfolioPosition?
+  portfolioDecisions PortfolioDecision[]
+  executionOrders   ExecutionOrder[]
 
   @@index([marketId])
   @@index([createdAt])
+  @@index([signalType, status])
+  @@index([alphaScore])
+  @@index([consensusScore])
+}
+
+model ShadowTrade {
+  id                    String    @id @default(cuid())
+  signalId              String    @unique
+  marketId              String
+  conditionId           String?
+  side                  String
+  entryDelayMs          Int       @default(180000)
+  simulatedEntryPrice   Float
+  currentPrice          Float
+  simulatedSizeUsd      Float     @default(100)
+  positionRemaining     Float     @default(1)
+  unrealizedPnl         Float     @default(0)
+  realizedPnl           Float     @default(0)
+  roi                   Float     @default(0)
+  status                String    @default("OPEN")
+  entryReasoning        String
+  latestReasoning       String    @default("")
+  maxFavorableExcursion Float     @default(0)
+  maxAdverseExcursion   Float     @default(0)
+  missedProfitAfterExit Float     @default(0)
+  wouldHaveBeenBetterToHold Boolean @default(false)
+  partialExitDone       Boolean   @default(false)
+  runnerActive          Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  closedAt              DateTime?
+  updatedAt             DateTime  @updatedAt
+
+  signal            Signal             @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  market            Market             @relation(fields: [marketId], references: [id])
+  simulationResults SimulationResult[]
+  replaySnapshots   ReplaySnapshot[]
+
+  @@index([marketId])
+  @@index([status])
+  @@index([roi])
+}
+
+model SimulationResult {
+  id             String   @id @default(cuid())
+  shadowTradeId  String
+  strategyName   String
+  entryDelayMs   Int
+  entryPrice     Float
+  exitPrice      Float
+  roi            Float
+  maxDrawdown    Float
+  holdingTimeMs  Int
+  outcome        String
+  createdAt      DateTime @default(now())
+
+  shadowTrade ShadowTrade @relation(fields: [shadowTradeId], references: [id], onDelete: Cascade)
+
+  @@unique([shadowTradeId, strategyName])
+  @@index([strategyName])
+  @@index([roi])
+}
+
+model ReplaySnapshot {
+  id            String   @id @default(cuid())
+  signalId      String
+  shadowTradeId String?
+  capturedAt    DateTime @default(now())
+  payload       Json
+
+  signal      Signal       @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  shadowTrade ShadowTrade? @relation(fields: [shadowTradeId], references: [id], onDelete: SetNull)
+
+  @@index([signalId, capturedAt])
+  @@index([shadowTradeId])
 }
 
 model PortfolioSnapshot {
-  id           String   @id @default(cuid())
-  totalValue   Float
-  allocations  Json
-  sharpeRatio  Float?
-  maxDrawdown  Float?
-  capturedAt   DateTime @default(now())
+  id          String   @id @default(cuid())
+  totalValue  Float
+  allocations Json
+  sharpeRatio Float?
+  maxDrawdown Float?
+  capturedAt  DateTime @default(now())
+}
+
+/// Phase F — simulated advisory portfolio (no live execution)
+model PortfolioState {
+  id                 String   @id @default("current")
+  accountValue       Float
+  tradingBankroll    Float
+  reserveCapital     Float    @default(0)
+  deployedCapital    Float    @default(0)
+  availableCapital   Float    @default(0)
+  realizedPnl        Float    @default(0)
+  unrealizedPnl      Float    @default(0)
+  highWaterMark      Float
+  currentDrawdown    Float    @default(0)
+  systemConfidence   Float    @default(0)
+  alphaScore         Float    @default(0)
+  drawdownMode       Boolean  @default(false)
+  updatedAt          DateTime @updatedAt
+  createdAt          DateTime @default(now())
+
+  snapshots  PortfolioAllocationSnapshot[]
+}
+
+model PortfolioPosition {
+  id                 String    @id @default(cuid())
+  signalId           String    @unique
+  marketId           String
+  side               String
+  status             String    @default("OPEN")
+  allocatedUsd       Float
+  positionPct        Float
+  compositeScore     Float
+  riskScore          Float
+  alphaScore         Float
+  consensusScore     Float
+  category           String?
+  entryPrice         Float     @default(0.5)
+  currentPrice       Float     @default(0.5)
+  positionRemaining  Float     @default(1)
+  partialExitDone    Boolean   @default(false)
+  runnerActive       Boolean   @default(false)
+  unrealizedPnl      Float     @default(0)
+  realizedPnl        Float     @default(0)
+  roi                Float     @default(0)
+  missedProfit       Float     @default(0)
+  bestExitStrategy   String?
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  signal Signal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([marketId])
+  @@index([status])
+  @@index([category])
+}
+
+model PortfolioDecision {
+  id                    String   @id @default(cuid())
+  signalId              String
+  marketId              String
+  decision              String
+  compositeScore        Float
+  riskScore             Float
+  recommendedSizeUsd    Float    @default(0)
+  recommendedPct        Float    @default(0)
+  reasons               String[] @default([])
+  reallocationTargetId  String?
+  capViolation          Boolean  @default(false)
+  createdAt             DateTime @default(now())
+
+  signal          Signal           @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  market          Market           @relation(fields: [marketId], references: [id])
+  executionOrders ExecutionOrder[]
+
+  @@index([signalId, createdAt])
+  @@index([decision])
+  @@index([createdAt])
+}
+
+model PortfolioAllocationSnapshot {
+  id                  String   @id @default(cuid())
+  portfolioStateId    String   @default("current")
+  deployedPct         Float
+  openPositionCount   Int
+  acceptedCount       Int      @default(0)
+  watchCount          Int      @default(0)
+  rejectCount         Int      @default(0)
+  reallocateCount     Int      @default(0)
+  largestPositionPct  Float    @default(0)
+  summary             Json?
+  capturedAt          DateTime @default(now())
+
+  portfolioState PortfolioState @relation(fields: [portfolioStateId], references: [id], onDelete: Cascade)
+
+  @@index([capturedAt])
+}
+
+model RiskEvent {
+  id        String   @id @default(cuid())
+  eventType String
+  severity  String   @default("info")
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model CapitalLedgerEntry {
+  id                   String   @id @default(cuid())
+  entryType            String
+  amount               Float
+  tradingBankrollAfter Float?
+  reserveAfter         Float?
+  note                 String?
+  relatedPositionId    String?
+  createdAt            DateTime @default(now())
+
+  @@index([entryType])
+  @@index([createdAt])
 }
 
 model IngestionRun {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   source     String
   status     String
-  itemCount  Int      @default(0)
+  itemCount  Int       @default(0)
+  metadata   Json?
   error      String?
-  startedAt  DateTime @default(now())
+  startedAt  DateTime  @default(now())
   finishedAt DateTime?
+}
+
+model RawApiPayload {
+  id        String   @id @default(cuid())
+  source    String
+  endpoint  String
+  payload   Json
+  fetchedAt DateTime @default(now())
+
+  trades Trade[]
+
+  @@index([source, endpoint])
+  @@index([fetchedAt])
+}
+
+model SyncCursor {
+  id            String    @id @default(cuid())
+  stream        String    @unique
+  cursorType    String
+  cursorValue   String    @default("0")
+  status        String    @default("idle")
+  metadata      Json?
+  lastRunAt     DateTime?
+  lastSuccessAt DateTime?
+  error         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model DiscordEvent {
+  id           String    @id @default(cuid())
+  eventType    String
+  dedupeKey    String?   @unique
+  title        String
+  payload      Json
+  status       String    @default("PENDING")
+  errorMessage String?
+  retryCount   Int       @default(0)
+  nextRetryAt  DateTime?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([status])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+/// Phase G — execution lifecycle (paper / live / replay)
+model ExecutionOrder {
+  id                  String    @id @default(cuid())
+  idempotencyKey      String    @unique
+  signalId            String
+  portfolioDecisionId String?
+  provider            String
+  mode                String    @default("PAPER")
+  marketId            String
+  side                String
+  outcome             String?
+  orderType           String    @default("LIMIT")
+  requestedSizeUsd    Float
+  requestedPrice      Float?
+  status              String    @default("PENDING")
+  providerOrderId     String?
+  fillPrice           Float?
+  filledSizeUsd       Float     @default(0)
+  errorMessage        String?
+  blockReason         String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  signal   Signal          @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  market   Market          @relation(fields: [marketId], references: [id])
+  decision PortfolioDecision? @relation(fields: [portfolioDecisionId], references: [id], onDelete: SetNull)
+  fills    ExecutionFill[]
+
+  @@index([signalId])
+  @@index([status])
+  @@index([provider])
+  @@index([createdAt])
+}
+
+model ExecutionFill {
+  id             String   @id @default(cuid())
+  orderId        String
+  idempotencyKey String   @unique
+  fillPrice      Float
+  filledSizeUsd  Float
+  partial        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  order ExecutionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model ExecutionPosition {
+  id                 String    @id @default(cuid())
+  signalId           String?   @unique
+  marketId           String
+  side               String
+  provider           String
+  status             String    @default("OPEN")
+  sizeUsd            Float
+  positionRemaining  Float     @default(1)
+  partialExitDone    Boolean   @default(false)
+  runnerActive       Boolean   @default(false)
+  entryPrice         Float
+  currentPrice       Float
+  unrealizedPnl      Float     @default(0)
+  realizedPnl        Float     @default(0)
+  providerPositionId String?
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([marketId, side, status])
+  @@index([status])
+  @@index([provider])
+}
+
+model ExecutionLock {
+  id        String   @id @default(cuid())
+  lockKey   String   @unique
+  holder    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model ExecutionAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  provider  String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ExecutionReconciliation {
+  id               String   @id @default("current")
+  status           String   @default("OK")
+  provider         String   @default("paper")
+  lastCheckedAt    DateTime @default(now())
+  mismatchDetails  Json?
+  updatedAt        DateTime @updatedAt
 }

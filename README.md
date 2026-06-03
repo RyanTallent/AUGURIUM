@@ -24,11 +24,20 @@ copy .env.example .env
 npm run db:generate
 npm run db:push
 
-# 4. Run the dashboard
+# 4. Run ingestion worker (Phase A) — separate terminal
+npm run dev:worker
+
+# 5. Run the dashboard
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+## Architecture
+
+See **AUGURIUM_TARGET_ARCHITECTURE.md** (locked target) and **AUGURIUM_GAP_ANALYSIS.md** (audit).
+
+**Current phase: A** — Polymarket ingestion (markets, trades, wallets, positions). Scoring, signals, and execution are intentionally disabled until later phases.
 
 ## GitHub workflow (Cursor → GitHub)
 

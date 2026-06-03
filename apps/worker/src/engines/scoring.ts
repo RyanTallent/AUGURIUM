@@ -1,17 +1,11 @@
-import { prisma } from "@augurium/database";
+import { runScoreTradersJob } from "../jobs/score-traders.js";
 
-/** Placeholder scoring engine — ranks traders by ROI until real cluster analysis lands. */
+/** Phase B — real trader metrics (no signals, no execution). */
 export async function scoreTraders(): Promise<number> {
-  const traders = await prisma.trader.findMany({ take: 100 });
-
-  for (const trader of traders) {
-    const normalized = Math.min(100, Math.max(0, 50 + trader.roi * 10));
-    await prisma.trader.update({
-      where: { id: trader.id },
-      data: { score: normalized },
-    });
-  }
-
-  console.log(`[scoring] updated ${traders.length} traders`);
-  return traders.length;
+  const summary = await runScoreTradersJob();
+  console.log(
+    `[scoring] scored=${summary.scored} skipped=${summary.skipped}`,
+    summary.skipReasons,
+  );
+  return summary.scored;
 }

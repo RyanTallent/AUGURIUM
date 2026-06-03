@@ -1,0 +1,117 @@
+.subtitle {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-top: 0.5rem;
+  max-width: 520px;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.table th,
+.table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wallet {
+  color: var(--accent);
+  font-family: var(--mono, monospace);
+}
+
+.lowConf {
+  margin-left: 0.35rem;
+  font-size: 0.65rem;
+  color: var(--negative);
+  text-transform: uppercase;
+}
+
+.tier {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.tier_SUPER_ELITE {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tier_ELITE {
+  color: var(--positive);
+}
+
+.tier_RISING {
+  color: #7eb8ff;
+}
+
+.tier_PROSPECT {
+  color: var(--muted);
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem !important;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.section h2 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.catList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.catList li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.back {
+  color: var(--accent);
+  font-size: 0.85rem;
+  display: inline-block;
+  margin-bottom: 1rem;
+}

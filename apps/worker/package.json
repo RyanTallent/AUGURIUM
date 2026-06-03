@@ -10,6 +10,12 @@
   },
   "dependencies": {
     "@augurium/database": "*",
+    "@augurium/intelligence": "*",
+    "@augurium/discord": "*",
+    "@augurium/shadow": "*",
+    "@augurium/portfolio": "*",
+    "@augurium/execution": "*",
+    "@augurium/scoring": "*",
     "@augurium/shared": "*",
     "ioredis": "^5.6.1"
   },
