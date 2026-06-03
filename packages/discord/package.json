@@ -13,6 +13,9 @@
     }
   },
   "files": ["dist", "src"],
+  "dependencies": {
+    "@augurium/shared": "*"
+  },
   "scripts": {
     "build": "tsc",
     "test": "npx tsx --test src/discord.test.ts src/discord-env.test.ts"

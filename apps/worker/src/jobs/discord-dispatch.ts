@@ -17,7 +17,7 @@ export interface DiscordDispatchSummary {
 }
 
 export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
-  const config = getDiscordConfig();
+  const config = getDiscordConfig(process.env);
   let sent = 0;
   let failed = 0;
   let skipped = 0;

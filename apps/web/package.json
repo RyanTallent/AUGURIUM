@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@augurium/database": "*",
-    "@augurium/discord": "*",
     "@augurium/shared": "*",
     "next": "^15.3.3",
     "react": "^19.1.0",

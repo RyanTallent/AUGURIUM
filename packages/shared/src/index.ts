@@ -107,3 +107,9 @@ export const SYNC_STREAMS = {
 } as const;
 
 export const APP_NAME = "AUGURIUM";
+
+export {
+  getDiscordConfig,
+  type DiscordConfig,
+  type DiscordEnvConfig,
+} from "./discord-config.js";

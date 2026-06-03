@@ -18,7 +18,7 @@ export interface DiscordEnqueueSummary {
 }
 
 export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
-  const config = getDiscordConfig();
+  const config = getDiscordConfig(process.env);
   const base = config.dashboardBaseUrl;
   let queued = 0;
   let skipped = 0;

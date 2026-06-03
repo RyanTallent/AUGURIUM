@@ -11,7 +11,7 @@ export async function queueDiscordEvent(input: {
   title: string;
   payload: DiscordEventPayload;
 }): Promise<"PENDING" | "SKIPPED"> {
-  const config = getDiscordConfig();
+  const config = getDiscordConfig(process.env);
 
   const existing = await prisma.discordEvent.findUnique({
     where: { dedupeKey: input.dedupeKey },

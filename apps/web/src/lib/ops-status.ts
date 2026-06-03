@@ -1,4 +1,4 @@
-import { getDiscordConfig } from "@augurium/discord";
+import { getDiscordConfig } from "@augurium/shared";
 import { prisma } from "@augurium/database";
 
 export interface DiscordOpsStatus {
