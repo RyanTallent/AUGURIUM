@@ -108,8 +108,8 @@ export default async function HomePage() {
             ))}
           </ul>
           <p className={styles.hint}>
-            <a href="/reports">Discord setup</a> · <a href="/shadow">shadow prices</a> ·{" "}
-            <a href="/traders">scoring</a>
+            <a href="/health">production health</a> · <a href="/reports">Discord setup</a> ·{" "}
+            <a href="/shadow">shadow prices</a> · <a href="/traders">scoring</a>
           </p>
         </section>
       )}

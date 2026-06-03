@@ -19,9 +19,9 @@ async function main() {
       "Discord not configured — set DISCORD_ENABLED=true and DISCORD_WEBHOOK_URL on Render",
     );
   }
-  if (health.scoreCoveragePct < 15) {
+  if (!health.scoringHealthy) {
     warnings.push(
-      `Low scored-trader coverage (${health.scoreCoveragePct}%, ${health.unscoredEligibleRemaining} eligible unscored remaining)`,
+      `Scoring backlog: ${health.unscoredEligibleRemaining} eligible unscored (${health.scoreCoverageEligiblePct}% of ${health.eligibleWallets} eligible scored)`,
     );
   }
   if (health.shadowTotal > 0 && health.shadowFreshPct < 25) {

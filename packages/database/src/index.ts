@@ -5,3 +5,8 @@ export {
   type ProductionHealthReport,
   type ShadowSyncRunStats,
 } from "./production-health.js";
+export {
+  computeScoringHealth,
+  scoringWarningMessage,
+  type ScoringHealthMetrics,
+} from "./scoring-health.js";

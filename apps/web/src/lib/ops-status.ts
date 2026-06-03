@@ -1,5 +1,6 @@
 import { getDiscordConfig } from "@augurium/shared";
 import { prisma } from "@augurium/database";
+import { getScoringHealthMetrics, scoringWarningMessage } from "./scoring-health";
 
 export interface DiscordOpsStatus {
   enabled: boolean;
@@ -74,7 +75,7 @@ export async function getProductionWarnings(): Promise<ProductionWarnings> {
   }
 
   try {
-    const [marketTotal, categorized, scoredTraders, traderTotal, shadowTotal, shadowFresh, tradeNow] =
+    const [marketTotal, categorized, scoring, shadowTotal, shadowFresh, tradeNow] =
       await Promise.all([
         prisma.market.count(),
         prisma.market.count({
@@ -85,8 +86,7 @@ export async function getProductionWarnings(): Promise<ProductionWarnings> {
             ],
           },
         }),
-        prisma.trader.count({ where: { lastScoredAt: { not: null } } }),
-        prisma.trader.count(),
+        getScoringHealthMetrics(),
         prisma.shadowTrade.count(),
         prisma.shadowTrade.count({ where: { priceStatus: "FRESH" } }),
         prisma.signal.count({ where: { status: "active", signalType: "TRADE_NOW" } }),
@@ -99,12 +99,8 @@ export async function getProductionWarnings(): Promise<ProductionWarnings> {
       );
     }
 
-    const scorePct = traderTotal > 0 ? (scoredTraders / traderTotal) * 100 : 0;
-    if (scorePct < 15) {
-      messages.push(
-        `Scoring coverage is low (${scorePct.toFixed(0)}% of wallets scored). Worker score-traders queue needs more runs.`,
-      );
-    }
+    const scoreWarn = scoringWarningMessage(scoring);
+    if (scoreWarn) messages.push(scoreWarn);
 
     if (shadowTotal > 0) {
       const freshPct = (shadowFresh / shadowTotal) * 100;

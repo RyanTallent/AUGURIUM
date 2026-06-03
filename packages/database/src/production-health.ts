@@ -1,4 +1,5 @@
 import { prisma } from "./client.js";
+import { computeScoringHealth } from "./scoring-health.js";
 
 export interface ShadowSyncRunStats {
   selected: number | null;
@@ -15,6 +16,10 @@ export interface ProductionHealthReport {
   walletsTotal: number;
   scoredWallets: number;
   unscoredEligibleRemaining: number;
+  eligibleWallets: number;
+  scoreCoverageEligiblePct: number;
+  scoringHealthy: boolean;
+  /** @deprecated Use scoreCoverageEligiblePct (eligible-wallet denominator). */
   scoreCoveragePct: number;
   shadowTotal: number;
   shadowFresh: number;
@@ -112,8 +117,7 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
   );
   const shadowFresh = shadowPriceStatusCounts.FRESH ?? 0;
   const shadowStale = shadowPriceStatusCounts.STALE ?? 0;
-  const scoreCoveragePct =
-    walletsTotal > 0 ? Number(((scoredWallets / walletsTotal) * 100).toFixed(1)) : 0;
+  const scoring = computeScoringHealth(scoredWallets, unscoredEligibleRemaining);
   const shadowFreshPct =
     shadowTotal > 0 ? Number(((shadowFresh / shadowTotal) * 100).toFixed(1)) : 0;
   const shadowStalePct =
@@ -123,9 +127,12 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
 
   return {
     walletsTotal,
-    scoredWallets,
-    unscoredEligibleRemaining,
-    scoreCoveragePct,
+    scoredWallets: scoring.scoredWallets,
+    unscoredEligibleRemaining: scoring.unscoredEligibleRemaining,
+    eligibleWallets: scoring.eligibleWallets,
+    scoreCoverageEligiblePct: scoring.scoreCoverageEligiblePct,
+    scoringHealthy: scoring.scoringHealthy,
+    scoreCoveragePct: scoring.scoreCoverageEligiblePct,
     shadowTotal,
     shadowFresh,
     shadowStale,

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@augurium/database";
 import { getProductionWarnings } from "../../lib/ops-status";
+import { getScoringHealthMetrics } from "../../lib/scoring-health";
 import styles from "../page.module.css";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +14,11 @@ export default async function OverviewPage() {
     ignore: 0,
     avgAlpha: 0,
     avgConfidence: 0,
-    scoredTraders: 0,
-    traderTotal: 0,
+    scoredWallets: 0,
+    eligibleWallets: 0,
+    scoreCoverageEligiblePct: 0,
+    unscoredEligibleRemaining: 0,
+    scoringHealthy: false,
     categorizedPct: 0,
     shadowFreshPct: 0,
     activeSignals: 0,
@@ -28,8 +32,7 @@ export default async function OverviewPage() {
       research,
       ignore,
       activeSignals,
-      scoredTraders,
-      traderTotal,
+      scoring,
       marketTotal,
       categorized,
       shadowTotal,
@@ -41,10 +44,7 @@ export default async function OverviewPage() {
         prisma.signal.count({ where: { status: "active", signalType: "RESEARCH" } }),
         prisma.signal.count({ where: { status: "active", signalType: "IGNORE" } }),
         prisma.signal.count({ where: { status: "active" } }),
-        prisma.trader.count({
-          where: { metricsSnapshots: { some: { skipReason: null } } },
-        }),
-        prisma.trader.count(),
+        getScoringHealthMetrics(),
         prisma.market.count(),
         prisma.market.count({
           where: {
@@ -69,8 +69,11 @@ export default async function OverviewPage() {
       ignore,
       avgAlpha: aggregates._avg.alphaScore ?? 0,
       avgConfidence: aggregates._avg.systemConfidenceScore ?? 0,
-      scoredTraders,
-      traderTotal,
+      scoredWallets: scoring.scoredWallets,
+      eligibleWallets: scoring.eligibleWallets,
+      scoreCoverageEligiblePct: scoring.scoreCoverageEligiblePct,
+      unscoredEligibleRemaining: scoring.unscoredEligibleRemaining,
+      scoringHealthy: scoring.scoringHealthy,
       categorizedPct: marketTotal > 0 ? (categorized / marketTotal) * 100 : 0,
       shadowFreshPct: shadowTotal > 0 ? (shadowFresh / shadowTotal) * 100 : 0,
       activeSignals,
@@ -92,8 +95,12 @@ export default async function OverviewPage() {
           <h1>Intelligence overview</h1>
           <p className={styles.hint}>Advisory signals — live execution disabled</p>
         </div>
-        <span className={stats.dbOk ? styles.ok : styles.warn}>
-          {stats.dbOk ? "DB connected" : "DB offline"}
+        <span className={stats.dbOk && stats.scoringHealthy ? styles.ok : styles.warn}>
+          {stats.dbOk
+            ? stats.scoringHealthy
+              ? "Scoring healthy"
+              : `${stats.unscoredEligibleRemaining} eligible unscored`
+            : "DB offline"}
         </span>
       </header>
 
@@ -119,8 +126,12 @@ export default async function OverviewPage() {
           <p className={styles.metric}>{stats.research}</p>
         </article>
         <article className={styles.card}>
-          <h2>Scored traders</h2>
-          <p className={styles.metric}>{stats.scoredTraders}</p>
+          <h2>Scored wallets</h2>
+          <p className={styles.metric}>{stats.scoredWallets}</p>
+        </article>
+        <article className={styles.card}>
+          <h2>Eligible wallets</h2>
+          <p className={styles.metric}>{stats.eligibleWallets}</p>
         </article>
       </section>
 
@@ -130,12 +141,10 @@ export default async function OverviewPage() {
           <p className={styles.metric}>{stats.categorizedPct.toFixed(0)}%</p>
         </article>
         <article className={styles.card}>
-          <h2>Score coverage</h2>
-          <p className={styles.metric}>
-            {stats.traderTotal > 0
-              ? ((stats.scoredTraders / stats.traderTotal) * 100).toFixed(0)
-              : 0}
-            %
+          <h2>Eligible score coverage</h2>
+          <p className={styles.metric}>{stats.scoreCoverageEligiblePct.toFixed(0)}%</p>
+          <p className={styles.hint}>
+            {stats.unscoredEligibleRemaining} unscored eligible remaining
           </p>
         </article>
         <article className={styles.card}>
@@ -163,7 +172,10 @@ export default async function OverviewPage() {
         </p>
         <ul>
           <li>Avg signal system confidence: {stats.avgConfidence.toFixed(1)} / 100</li>
-          <li>Scored traders: {stats.scoredTraders} / {stats.traderTotal} wallets</li>
+          <li>
+            Scored wallets: {stats.scoredWallets} / {stats.eligibleWallets} eligible (
+            {stats.scoreCoverageEligiblePct.toFixed(0)}% coverage)
+          </li>
           <li>Categorized markets: {stats.categorizedPct.toFixed(0)}%</li>
           <li>Shadow trades with FRESH prices: {stats.shadowFreshPct.toFixed(0)}%</li>
         </ul>
@@ -180,6 +192,9 @@ export default async function OverviewPage() {
           </li>
           <li>
             <Link href="/traders">Traders</Link>
+          </li>
+          <li>
+            <Link href="/health">Production health</Link>
           </li>
         </ul>
       </section>
