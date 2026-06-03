@@ -1,0 +1,137 @@
+# AUGURIUM — Render Blueprint (production-oriented)
+# Monorepo: npm workspaces at repository root (apps/web, apps/worker, packages/*)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# DATABASE_URL is wired from Render Postgres over the private network.
+# For Prisma pooling in production, you may append to DATABASE_URL in the Dashboard:
+#   &connect_timeout=30&pool_timeout=30&connection_limit=10
+# (one web + one worker instance; adjust connection_limit per instance count)
+
+databases:
+  - name: augurium-db
+    databaseName: augurium
+    user: augurium
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "16"
+    ipAllowList: []
+
+envVarGroups:
+  - name: augurium-shared
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: POLYMARKET_GAMMA_BASE
+        value: https://gamma-api.polymarket.com
+      - key: POLYMARKET_DATA_BASE
+        value: https://data-api.polymarket.com
+      - key: WORKER_POLL_INTERVAL_MS
+        value: "30000"
+      - key: EXECUTION_ENABLED
+        value: "false"
+      - key: EXECUTION_PROVIDER
+        value: paper
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: ALLOW_REAL_MONEY
+        value: "false"
+      - key: DISCORD_ENABLED
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: POLYMARKET_PRIVATE_KEY
+        sync: false
+      - key: POLYMARKET_API_KEY
+        sync: false
+      - key: POLYMARKET_API_SECRET
+        sync: false
+      - key: POLYMARKET_API_PASSPHRASE
+        sync: false
+      - key: POLYMARKET_FUNDER_ADDRESS
+        sync: false
+
+services:
+  - type: keyvalue
+    name: augurium-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+  - type: web
+    name: augurium-web
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: >-
+      npm ci &&
+      npm run db:generate &&
+      npm run build --workspace=@augurium/web
+    preDeployCommand: npm run db:push
+    startCommand: npm run start --workspace=@augurium/web
+    healthCheckPath: /
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - apps/web/**
+        - packages/**
+        - package.json
+        - package-lock.json
+      ignoredPaths:
+        - apps/worker/**
+        - scripts/**
+        - "**/*.md"
+    envVars:
+      - fromGroup: augurium-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: augurium-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: augurium-redis
+          property: connectionString
+      - key: AUGURIUM_DASHBOARD_URL
+        sync: false
+
+  - type: worker
+    name: augurium-worker
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: >-
+      npm ci &&
+      npm run db:generate &&
+      npm run build
+    preDeployCommand: npm run db:push
+    startCommand: npm run start --workspace=@augurium/worker
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - apps/worker/**
+        - packages/**
+        - package.json
+        - package-lock.json
+      ignoredPaths:
+        - apps/web/**
+        - scripts/**
+        - "**/*.md"
+    envVars:
+      - fromGroup: augurium-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: augurium-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: augurium-redis
+          property: connectionString
+      - key: AUGURIUM_DASHBOARD_URL
+        fromService:
+          type: web
+          name: augurium-web
+          envVarKey: RENDER_EXTERNAL_URL
