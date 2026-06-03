@@ -9,6 +9,7 @@ import {
   WORKER_QUEUES,
 } from "./lib/queue-scheduler.js";
 import { runQueueJob } from "./lib/run-queue-job.js";
+import { markOrphanedShadowPortfolioRuns } from "./lib/ingestion-run-lifecycle.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
@@ -80,6 +81,11 @@ async function bootstrap(): Promise<void> {
 
   await redis.ping();
   console.log("[worker] redis connected");
+
+  const orphaned = await markOrphanedShadowPortfolioRuns();
+  if (orphaned > 0) {
+    console.log(`[worker] cleared ${orphaned} orphaned shadow-portfolio ingestion run(s)`);
+  }
 
   await drainRedisTriggers();
 

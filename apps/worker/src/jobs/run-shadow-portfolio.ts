@@ -14,6 +14,11 @@ import {
   loadShadowPriceSources,
   priceCheckReasonForResult,
 } from "../lib/shadow-price-sources.js";
+import {
+  ensureShadowRunNotStuck,
+  finalizeShadowPortfolioRun,
+  writeShadowSyncProgress,
+} from "../lib/ingestion-run-lifecycle.js";
 import { runShadowPriceSync, type ShadowPriceSyncStats } from "./shadow-price-sync.js";
 
 const SHADOW_SIGNAL_TYPES = ["TRADE_NOW", "WATCHLIST", "RESEARCH"];
@@ -40,6 +45,8 @@ export interface ShadowPortfolioSummary {
   staleCount: number;
   shadowTotal: number;
   errorCount: number;
+  timedOut: boolean;
+  durationMs: number;
 }
 
 function syncToSummary(sync: ShadowPriceSyncStats): ShadowPortfolioSummary {
@@ -61,6 +68,8 @@ function syncToSummary(sync: ShadowPriceSyncStats): ShadowPortfolioSummary {
     staleCount: sync.staleCount,
     shadowTotal: sync.shadowTotal,
     errorCount: sync.errorCount,
+    timedOut: sync.timedOut,
+    durationMs: sync.durationMs,
   };
 }
 
@@ -70,10 +79,42 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
   });
 
   const now = new Date();
+  let summary = syncToSummary({
+    shadowTotal: 0,
+    selectedCount: 0,
+    processedCount: 0,
+    updatedCount: 0,
+    closedCount: 0,
+    freshCount: 0,
+    staleCount: 0,
+    noSourceCount: 0,
+    noUpdateCount: 0,
+    errorCount: 0,
+    batchSize: 0,
+    chunkSize: 0,
+    chunkCount: 0,
+    durationMs: 0,
+    timedOut: false,
+  });
 
   try {
-    const sync = await runShadowPriceSync(now);
-    const summary = syncToSummary(sync);
+    const sync = await runShadowPriceSync(now, run.id);
+    summary = syncToSummary(sync);
+
+    if (sync.timedOut) {
+      return summary;
+    }
+
+    await writeShadowSyncProgress(run.id, {
+      phase: "sync_complete",
+      shadowTotal: sync.shadowTotal,
+      selected: sync.selectedCount,
+      processed: sync.processedCount,
+      updated: sync.updatedCount,
+      fresh: sync.freshCount,
+      stale: sync.staleCount,
+      durationMs: sync.durationMs,
+    });
 
     const signalsWithoutShadow = await prisma.signal.findMany({
       where: {
@@ -265,39 +306,48 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
       summary.created++;
     }
 
-    await prisma.ingestionRun.update({
-      where: { id: run.id },
-      data: {
-        status: "success",
-        itemCount: sync.processedCount,
-        finishedAt: new Date(),
-        metadata: {
-          shadowTotal: sync.shadowTotal,
-          selected: sync.selectedCount,
-          processed: sync.processedCount,
-          updated: sync.updatedCount,
-          fresh: sync.freshCount,
-          stale: sync.staleCount,
-          noSource: sync.noSourceCount,
-          noUpdate: sync.noUpdateCount,
-          closed: sync.closedCount,
-          errors: sync.errorCount,
-          batchSize: sync.batchSize,
-          created: summary.created,
-          simulations: summary.simulations,
-          replays: summary.replays,
-        },
+    await finalizeShadowPortfolioRun(run.id, {
+      status: "success",
+      itemCount: sync.processedCount,
+      metadata: {
+        shadowTotal: sync.shadowTotal,
+        selected: sync.selectedCount,
+        processed: sync.processedCount,
+        updated: sync.updatedCount,
+        fresh: sync.freshCount,
+        stale: sync.staleCount,
+        noSource: sync.noSourceCount,
+        noUpdate: sync.noUpdateCount,
+        closed: sync.closedCount,
+        errors: sync.errorCount,
+        batchSize: sync.batchSize,
+        chunkSize: sync.chunkSize,
+        chunkCount: sync.chunkCount,
+        durationMs: sync.durationMs,
+        created: summary.created,
+        simulations: summary.simulations,
+        replays: summary.replays,
+        phase: "complete",
       },
     });
 
     return summary;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.ingestionRun.update({
-      where: { id: run.id },
-      data: { status: "error", error: message, finishedAt: new Date() },
+    await finalizeShadowPortfolioRun(run.id, {
+      status: "error",
+      itemCount: summary.processedCount,
+      error: message,
+      metadata: {
+        processed: summary.processedCount,
+        selected: summary.selectedCount,
+        reason: "exception",
+        durationMs: Date.now() - now.getTime(),
+      },
     });
     throw err;
+  } finally {
+    await ensureShadowRunNotStuck(run.id);
   }
 }
 

@@ -77,6 +77,29 @@ export default async function ProductionHealthPage() {
         </article>
       </section>
 
+      <section className={styles.grid} style={{ marginTop: "1.5rem" }}>
+        <article className={styles.card}>
+          <h2>Shadow sync running</h2>
+          <p className={styles.metricSmall}>
+            {health.latestShadowSyncRunning
+              ? `${health.latestShadowSyncRunning.status} since ${new Date(health.latestShadowSyncRunning.startedAt).toLocaleString()}`
+              : "none"}
+          </p>
+        </article>
+        <article className={styles.card}>
+          <h2>Last completed shadow sync</h2>
+          <p className={styles.metricSmall}>
+            {health.latestShadowSyncCompleted
+              ? `${health.latestShadowSyncCompleted.status} · processed ${health.latestShadowSyncCompleted.itemCount ?? "—"}`
+              : "—"}
+          </p>
+        </article>
+        <article className={styles.card}>
+          <h2>Orphaned running (&gt;10m)</h2>
+          <p className={styles.metric}>{health.shadowSyncOrphanedRunningCount}</p>
+        </article>
+      </section>
+
       <section className={styles.modules} style={{ marginTop: "2rem" }}>
         <h2>Latest worker runs</h2>
         <ul>
@@ -85,7 +108,7 @@ export default async function ProductionHealthPage() {
             {health.latestScoreTradersRun?.itemCount ?? "—"}
           </li>
           <li>
-            shadow-portfolio: {health.latestShadowSyncRun?.status ?? "—"} · selected{" "}
+            shadow-portfolio (latest): {health.latestShadowSyncRun?.status ?? "—"} · selected{" "}
             {health.latestShadowSyncSelected ?? "—"} · processed{" "}
             {health.latestShadowSyncProcessed ?? "—"} · updated{" "}
             {health.latestShadowSyncUpdated ?? "—"}

@@ -37,6 +37,10 @@ envVarGroups:
         value: "30000"
       - key: SHADOW_SYNC_BATCH_SIZE
         value: "500"
+      - key: SHADOW_SYNC_CHUNK_SIZE
+        value: "50"
+      - key: SHADOW_SYNC_MAX_RUNTIME_MS
+        value: "120000"
       - key: EXECUTION_ENABLED
         value: "false"
       - key: EXECUTION_PROVIDER

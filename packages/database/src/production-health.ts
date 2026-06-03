@@ -29,6 +29,9 @@ export interface ProductionHealthReport {
   shadowPriceStatusCounts: Record<string, number>;
   latestScoreTradersRun: IngestionRunSummary | null;
   latestShadowSyncRun: IngestionRunSummary | null;
+  latestShadowSyncCompleted: IngestionRunSummary | null;
+  latestShadowSyncRunning: IngestionRunSummary | null;
+  shadowSyncOrphanedRunningCount: number;
   latestShadowSyncSelected: number | null;
   latestShadowSyncProcessed: number | null;
   latestShadowSyncUpdated: number | null;
@@ -44,6 +47,7 @@ export interface IngestionRunSummary {
 }
 
 const MIN_TRADES_ELIGIBLE = Number(process.env.SCORE_MIN_TRADES ?? "5");
+const SHADOW_ORPHAN_MS = Number(process.env.SHADOW_SYNC_ORPHAN_MS ?? String(10 * 60 * 1000));
 
 export function parseShadowSyncStats(metadata: unknown): ShadowSyncRunStats | null {
   if (!metadata || typeof metadata !== "object") return null;
@@ -86,6 +90,8 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
     tradeRows: { some: { size: { gt: 0 } } },
   } as const;
 
+  const orphanCutoff = new Date(Date.now() - SHADOW_ORPHAN_MS);
+
   const [
     walletsTotal,
     scoredWallets,
@@ -94,6 +100,9 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
     shadowGrouped,
     latestScoreTradersRun,
     latestShadowSyncRun,
+    latestShadowSyncCompleted,
+    latestShadowSyncRunning,
+    shadowSyncOrphanedRunningCount,
   ] = await Promise.all([
     prisma.trader.count(),
     prisma.trader.count({ where: { lastScoredAt: { not: null } } }),
@@ -110,6 +119,25 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
       where: { source: "shadow-portfolio" },
       orderBy: { startedAt: "desc" },
     }),
+    prisma.ingestionRun.findFirst({
+      where: {
+        source: "shadow-portfolio",
+        finishedAt: { not: null },
+        status: { in: ["success", "error", "failed_orphaned"] },
+      },
+      orderBy: { finishedAt: "desc" },
+    }),
+    prisma.ingestionRun.findFirst({
+      where: { source: "shadow-portfolio", status: "running" },
+      orderBy: { startedAt: "desc" },
+    }),
+    prisma.ingestionRun.count({
+      where: {
+        source: "shadow-portfolio",
+        status: "running",
+        startedAt: { lt: orphanCutoff },
+      },
+    }),
   ]);
 
   const shadowPriceStatusCounts = Object.fromEntries(
@@ -123,7 +151,8 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
   const shadowStalePct =
     shadowTotal > 0 ? Number(((shadowStale / shadowTotal) * 100).toFixed(1)) : 0;
 
-  const shadowStats = parseShadowSyncStats(latestShadowSyncRun?.metadata);
+  const completedStats = parseShadowSyncStats(latestShadowSyncCompleted?.metadata);
+  const latestStats = parseShadowSyncStats(latestShadowSyncRun?.metadata);
 
   return {
     walletsTotal,
@@ -141,10 +170,18 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
     shadowPriceStatusCounts,
     latestScoreTradersRun: mapRun(latestScoreTradersRun),
     latestShadowSyncRun: mapRun(latestShadowSyncRun),
-    latestShadowSyncSelected: shadowStats?.selected ?? shadowStats?.processed ?? null,
+    latestShadowSyncCompleted: mapRun(latestShadowSyncCompleted),
+    latestShadowSyncRunning: mapRun(latestShadowSyncRunning),
+    shadowSyncOrphanedRunningCount,
+    latestShadowSyncSelected:
+      latestStats?.selected ?? completedStats?.selected ?? null,
     latestShadowSyncProcessed:
-      shadowStats?.processed ?? latestShadowSyncRun?.itemCount ?? null,
-    latestShadowSyncUpdated: shadowStats?.updated ?? null,
+      latestStats?.processed ??
+      completedStats?.processed ??
+      latestShadowSyncRun?.itemCount ??
+      null,
+    latestShadowSyncUpdated:
+      latestStats?.updated ?? completedStats?.updated ?? null,
     generatedAt: new Date().toISOString(),
   };
 }
