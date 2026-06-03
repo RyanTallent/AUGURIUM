@@ -12,11 +12,18 @@ import {
   updateExcursions,
   type TapePoint,
 } from "@augurium/shadow";
-import { buildMarketTapeForMarket, latestMarketTradePrice } from "../lib/market-tapes.js";
+import {
+  buildMarketTapeForMarket,
+  latestMarketTrade,
+  latestMarketTradePrice,
+} from "../lib/market-tapes.js";
 
 const SHADOW_SIGNAL_TYPES = ["TRADE_NOW", "WATCHLIST", "RESEARCH"];
-const MAX_NEW_PER_RUN = Number(process.env.SHADOW_MAX_NEW ?? "100");
-const MAX_UPDATE_PER_RUN = Number(process.env.SHADOW_MAX_UPDATE ?? "200");
+const MAX_NEW_PER_RUN = Number(process.env.SHADOW_MAX_NEW ?? "150");
+const MAX_UPDATE_PER_RUN = Number(process.env.SHADOW_MAX_UPDATE ?? "500");
+const SHADOW_STALE_AFTER_MS = Number(
+  process.env.SHADOW_PRICE_STALE_MS ?? String(6 * 60 * 60 * 1000),
+);
 
 export interface ShadowPortfolioSummary {
   created: number;
@@ -24,6 +31,23 @@ export interface ShadowPortfolioSummary {
   closed: number;
   simulations: number;
   replays: number;
+  priceFresh: number;
+  priceStale: number;
+  priceNoUpdate: number;
+  priceNoSource: number;
+}
+
+function countPriceStatus(
+  status: string,
+  counts: Pick<
+    ShadowPortfolioSummary,
+    "priceFresh" | "priceStale" | "priceNoUpdate" | "priceNoSource"
+  >,
+): void {
+  if (status === "FRESH") counts.priceFresh++;
+  else if (status === "STALE") counts.priceStale++;
+  else if (status === "NO_PRICE_UPDATE") counts.priceNoUpdate++;
+  else if (status === "NO_PRICE_SOURCE") counts.priceNoSource++;
 }
 
 async function resolveTapeForMarket(
@@ -59,6 +83,12 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
   let closed = 0;
   let simulations = 0;
   let replays = 0;
+  const priceCounts = {
+    priceFresh: 0,
+    priceStale: 0,
+    priceNoUpdate: 0,
+    priceNoSource: 0,
+  };
 
   try {
     const signalsWithoutShadow = await prisma.signal.findMany({
@@ -88,7 +118,9 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         entryPrice: 0,
         side: signal.side,
         tape,
+        marketLatestTrade: await latestMarketTrade(signal.marketId),
         now,
+        staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
       const entryPrice =
         priceAtOrAfter(tape, entryMs) ??
@@ -102,10 +134,13 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         entryPrice,
         side: signal.side,
         tape,
+        marketLatestTrade: await latestMarketTrade(signal.marketId),
         marketSnapshotPrice: await latestMarketTradePrice(signal.marketId),
         lastKnownPrice: entryPrice,
         now,
+        staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
+      countPriceStatus(postEntry.priceStatus, priceCounts);
 
       const metrics = computePositionMetrics(
         entryPrice,
@@ -241,6 +276,7 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
     const openShadows = await prisma.shadowTrade.findMany({
       where: { status: "OPEN" },
       include: { signal: { include: { market: true } } },
+      orderBy: [{ lastPriceUpdateAt: "asc" }],
       take: MAX_UPDATE_PER_RUN,
     });
 
@@ -251,16 +287,19 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         shadow.side,
       );
       const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
-      const snapshotPrice = await latestMarketTradePrice(shadow.marketId);
+      const marketTrade = await latestMarketTrade(shadow.marketId);
       const priced = resolveShadowPrice({
         entryMs,
         entryPrice: shadow.simulatedEntryPrice,
         side: shadow.side,
         tape,
-        marketSnapshotPrice: snapshotPrice,
+        marketLatestTrade: marketTrade,
+        marketSnapshotPrice: marketTrade?.price ?? null,
         lastKnownPrice: shadow.currentPrice,
         now,
+        staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
+      countPriceStatus(priced.priceStatus, priceCounts);
 
       let state = computePositionMetrics(
         shadow.simulatedEntryPrice,
@@ -333,11 +372,29 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         status: "success",
         itemCount: created + updated,
         finishedAt: new Date(),
-        metadata: { created, updated, closed, simulations, replays },
+        metadata: {
+          created,
+          updated,
+          closed,
+          simulations,
+          replays,
+          ...priceCounts,
+        },
       },
     });
 
-    return { created, updated, closed, simulations, replays };
+    console.log(
+      `[shadow:sync] created=${created} updated=${updated} closed=${closed} fresh=${priceCounts.priceFresh} stale=${priceCounts.priceStale} noUpdate=${priceCounts.priceNoUpdate} noSource=${priceCounts.priceNoSource}`,
+    );
+
+    return {
+      created,
+      updated,
+      closed,
+      simulations,
+      replays,
+      ...priceCounts,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await prisma.ingestionRun.update({

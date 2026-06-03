@@ -49,7 +49,12 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
     }
     case QUEUES.TRADER_SCORE: {
       const s = await runScoreTradersJob();
-      return { scored: s.scored, skipped: s.skipped };
+      return {
+        scored: s.scored,
+        skipped: s.skipped,
+        remaining: s.remaining,
+        durationMs: s.durationMs,
+      };
     }
     case QUEUES.SIGNAL_GENERATE: {
       const s = await runGenerateSignalsJob();
@@ -61,7 +66,10 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         created: s.created,
         updated: s.updated,
         closed: s.closed,
-        simulations: s.simulations,
+        fresh: s.priceFresh,
+        stale: s.priceStale,
+        noPriceUpdate: s.priceNoUpdate,
+        noPriceSource: s.priceNoSource,
       };
     }
     case QUEUES.DISCORD_ENQUEUE: {

@@ -23,7 +23,12 @@ Optional tuning:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `SIGNAL_WINDOW_MINUTES` | `1440` | Recent activity window for signals (24h) |
-| `SCORE_TRADERS_BATCH_SIZE` | `50` | Wallets scored per worker run |
+| `SCORE_TRADERS_BATCH_SIZE` | `250` | Wallets scored per worker run |
+| `WORKER_INTERVAL_TRADER_SCORE_MS` | `30000` | score-traders interval |
+| `WORKER_INTERVAL_SHADOW_SYNC_MS` | `30000` | shadow:sync interval |
+| `SCORE_RESCORE_COOLDOWN_HOURS` | `24` | Min hours before rescore (active wallets) |
+| `SCORE_LOW_VALUE_RESCORE_HOURS` | `72` | Min hours before rescore (low trade count) |
+| `SHADOW_MAX_UPDATE` | `500` | Open shadow positions repriced per run |
 
 After changing env vars, **redeploy the worker** (and web if dashboard Discord status should reflect new values).
 
@@ -35,13 +40,15 @@ npm run backfill:categories
 npm run verify:production-health
 ```
 
+Production health JSON: `GET /api/health/production` on the web service (or `npm run verify:production-health`).
+
 Worker periodic jobs (Render `augurium-worker`): the worker loop runs these on an interval (not only once at boot):
 
 | Job | Redis queue | Default interval |
 |-----|-------------|------------------|
-| score-traders | `trader:score` | 90s |
+| score-traders | `trader:score` | 30s |
 | signal:generate | `signal:generate` | 120s |
-| shadow:sync | `shadow:sync` | 120s |
+| shadow:sync | `shadow:sync` | 30s |
 | portfolio:run | `portfolio:run` | 300s |
 | discord:enqueue | `discord:enqueue` | 300s |
 | discord:dispatch | `discord:dispatch` | 60s |

@@ -13,6 +13,7 @@ export interface ResolveShadowPriceInput {
   tape: TapePoint[];
   marketSnapshotPrice?: number | null;
   lastKnownPrice?: number | null;
+  marketLatestTrade?: { tradedAt: Date; price: number } | null;
   now?: Date;
   staleAfterMs?: number;
 }
@@ -32,6 +33,25 @@ function latestPostEntry(tape: TapePoint[], entryMs: number): TapePoint | null {
   return latest;
 }
 
+function latestOnTape(tape: TapePoint[]): TapePoint | null {
+  if (tape.length === 0) return null;
+  return tape[tape.length - 1]!;
+}
+
+function freshTapeResult(
+  point: TapePoint,
+  now: Date,
+  staleAfterMs: number,
+): ResolveShadowPriceResult {
+  const ageMs = now.getTime() - point.tradedAt.getTime();
+  return {
+    currentPrice: point.price,
+    priceStatus: ageMs <= staleAfterMs ? "FRESH" : "STALE",
+    priceSource: "TRADE_TAPE",
+    lastPriceUpdateAt: point.tradedAt,
+  };
+}
+
 export function resolveShadowPrice(input: ResolveShadowPriceInput): ResolveShadowPriceResult {
   const now = input.now ?? new Date();
   const staleAfterMs = input.staleAfterMs ?? DEFAULT_STALE_MS;
@@ -39,13 +59,16 @@ export function resolveShadowPrice(input: ResolveShadowPriceInput): ResolveShado
 
   const postEntry = latestPostEntry(input.tape, entryMs);
   if (postEntry && postEntry.price > 0) {
-    const ageMs = now.getTime() - postEntry.tradedAt.getTime();
-    return {
-      currentPrice: postEntry.price,
-      priceStatus: ageMs <= staleAfterMs ? "FRESH" : "STALE",
-      priceSource: "TRADE_TAPE",
-      lastPriceUpdateAt: postEntry.tradedAt,
-    };
+    return freshTapeResult(postEntry, now, staleAfterMs);
+  }
+
+  const latest = latestOnTape(input.tape);
+  if (latest && latest.price > 0) {
+    return freshTapeResult(latest, now, staleAfterMs);
+  }
+
+  if (input.marketLatestTrade && input.marketLatestTrade.price > 0) {
+    return freshTapeResult(input.marketLatestTrade, now, staleAfterMs);
   }
 
   if (input.marketSnapshotPrice != null && input.marketSnapshotPrice > 0) {

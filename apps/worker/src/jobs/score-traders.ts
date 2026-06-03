@@ -6,17 +6,38 @@ import {
   type TradeInput,
 } from "@augurium/scoring";
 import { buildMarketTapesForKeys } from "../lib/market-tapes.js";
+import { pickTradersForScoring } from "./score-traders-select.js";
 
-const TRADERS_PER_RUN = Number(process.env.SCORE_TRADERS_BATCH_SIZE ?? "50");
-const MIN_TRADES_TO_SCORE = 5;
+const TRADERS_PER_RUN = Number(process.env.SCORE_TRADERS_BATCH_SIZE ?? "250");
+const MIN_TRADES_TO_SCORE = Number(process.env.SCORE_MIN_TRADES ?? "5");
+const RESCORE_COOLDOWN_MS =
+  Number(process.env.SCORE_RESCORE_COOLDOWN_HOURS ?? "24") * 60 * 60 * 1000;
+const LOW_VALUE_MAX_TRADES = Number(process.env.SCORE_LOW_VALUE_MAX_TRADES ?? "15");
+const LOW_VALUE_RESCORE_COOLDOWN_MS =
+  Number(process.env.SCORE_LOW_VALUE_RESCORE_HOURS ?? "72") * 60 * 60 * 1000;
+
+const eligibleWhere = {
+  trades: { gte: MIN_TRADES_TO_SCORE },
+  tradeRows: { some: { size: { gt: 0 } } },
+} as const;
 
 export interface ScoreTradersSummary {
   scored: number;
   skipped: number;
+  remaining: number;
+  durationMs: number;
+  unscoredEligible: number;
   skipReasons: Record<string, number>;
 }
 
+export async function countUnscoredEligible(): Promise<number> {
+  return prisma.trader.count({
+    where: { ...eligibleWhere, lastScoredAt: null },
+  });
+}
+
 export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
+  const startedAt = Date.now();
   const run = await prisma.ingestionRun.create({
     data: { source: "score-traders", status: "running" },
   });
@@ -27,32 +48,84 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
   const now = new Date();
 
   try {
-    const candidateTraders = await prisma.trader.findMany({
-      where: { trades: { gte: MIN_TRADES_TO_SCORE } },
-      orderBy: [{ lastScoredAt: "asc" }, { trades: "desc" }],
-      take: TRADERS_PER_RUN * 3,
-    });
+    const unscoredEligible = await countUnscoredEligible();
 
-    const traders = candidateTraders
-      .filter(
-        (t) =>
-          t.lastScoredAt == null ||
-          (t.lastActivityAt != null && t.lastActivityAt > t.lastScoredAt),
-      )
-      .slice(0, TRADERS_PER_RUN);
+    const [unscored, rescoreCandidates] = await Promise.all([
+      prisma.trader.findMany({
+        where: { ...eligibleWhere, lastScoredAt: null },
+        orderBy: [{ trades: "desc" }],
+        take: TRADERS_PER_RUN,
+        select: {
+          id: true,
+          trades: true,
+          lastScoredAt: true,
+          lastActivityAt: true,
+        },
+      }),
+      prisma.trader.findMany({
+        where: {
+          ...eligibleWhere,
+          lastScoredAt: { not: null },
+          lastActivityAt: { not: null },
+        },
+        orderBy: [{ lastScoredAt: "asc" }],
+        take: TRADERS_PER_RUN * 2,
+        select: {
+          id: true,
+          trades: true,
+          lastScoredAt: true,
+          lastActivityAt: true,
+        },
+      }),
+    ]);
 
-    if (traders.length === 0) {
+    const pickOptions = {
+      batchSize: TRADERS_PER_RUN,
+      minTrades: MIN_TRADES_TO_SCORE,
+      rescoreCooldownMs: RESCORE_COOLDOWN_MS,
+      lowValueMaxTrades: LOW_VALUE_MAX_TRADES,
+      lowValueRescoreCooldownMs: LOW_VALUE_RESCORE_COOLDOWN_MS,
+      now,
+    };
+
+    const picked = pickTradersForScoring(unscored, rescoreCandidates, pickOptions);
+    const traderIds = picked.map((t) => t.id);
+
+    if (traderIds.length === 0) {
+      const durationMs = Date.now() - startedAt;
       await prisma.ingestionRun.update({
         where: { id: run.id },
         data: {
           status: "success",
           itemCount: 0,
           finishedAt: new Date(),
-          metadata: { scored: 0, skipped: 0, skipReasons: {}, note: "all-traders-scored" },
+          metadata: {
+            scored: 0,
+            skipped: 0,
+            remaining: unscoredEligible,
+            durationMs,
+            note: "no-eligible-traders",
+          },
         },
       });
-      return { scored: 0, skipped: 0, skipReasons: {} };
+      console.log(
+        `[score-traders] scored=0 skipped=0 remaining=${unscoredEligible} durationMs=${durationMs}`,
+      );
+      return {
+        scored: 0,
+        skipped: 0,
+        remaining: unscoredEligible,
+        durationMs,
+        unscoredEligible,
+        skipReasons: {},
+      };
     }
+
+    const traders = await prisma.trader.findMany({
+      where: { id: { in: traderIds } },
+    });
+    const order = new Map(traderIds.map((id, i) => [id, i]));
+    traders.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
     for (const trader of traders) {
       const tradeRows = await prisma.trade.findMany({
@@ -107,6 +180,10 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
       if (metrics.skipReason) {
         skipped++;
         skipReasons[metrics.skipReason] = (skipReasons[metrics.skipReason] ?? 0) + 1;
+        await prisma.trader.update({
+          where: { id: trader.id },
+          data: { lastScoredAt: now },
+        });
         continue;
       }
 
@@ -229,15 +306,25 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
       void snapshot;
     }
 
+    const remaining = await countUnscoredEligible();
+    const durationMs = Date.now() - startedAt;
+
     await prisma.ingestionRun.update({
       where: { id: run.id },
       data: {
         status: "success",
         itemCount: scored,
         finishedAt: new Date(),
-        metadata: { scored, skipped, skipReasons },
+        metadata: { scored, skipped, remaining, durationMs, skipReasons, unscoredEligible },
       },
     });
+
+    console.log(
+      `[score-traders] scored=${scored} skipped=${skipped} remaining=${remaining} durationMs=${durationMs}`,
+      skipReasons,
+    );
+
+    return { scored, skipped, remaining, durationMs, unscoredEligible, skipReasons };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await prisma.ingestionRun.update({
@@ -246,6 +333,4 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
     });
     throw err;
   }
-
-  return { scored, skipped, skipReasons };
 }

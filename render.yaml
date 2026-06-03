@@ -29,6 +29,12 @@ envVarGroups:
         value: https://data-api.polymarket.com
       - key: WORKER_POLL_INTERVAL_MS
         value: "30000"
+      - key: SCORE_TRADERS_BATCH_SIZE
+        value: "250"
+      - key: WORKER_INTERVAL_TRADER_SCORE_MS
+        value: "30000"
+      - key: WORKER_INTERVAL_SHADOW_SYNC_MS
+        value: "30000"
       - key: EXECUTION_ENABLED
         value: "false"
       - key: EXECUTION_PROVIDER

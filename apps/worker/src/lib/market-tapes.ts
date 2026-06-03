@@ -48,10 +48,18 @@ export async function buildMarketTapeForMarket(
 }
 
 export async function latestMarketTradePrice(marketId: string): Promise<number | null> {
+  const row = await latestMarketTrade(marketId);
+  return row?.price ?? null;
+}
+
+export async function latestMarketTrade(
+  marketId: string,
+): Promise<{ price: number; tradedAt: Date } | null> {
   const row = await prisma.trade.findFirst({
     where: { marketId },
     orderBy: { tradedAt: "desc" },
-    select: { price: true },
+    select: { price: true, tradedAt: true },
   });
-  return row?.price ?? null;
+  if (!row || row.price <= 0) return null;
+  return { price: row.price, tradedAt: row.tradedAt };
 }
