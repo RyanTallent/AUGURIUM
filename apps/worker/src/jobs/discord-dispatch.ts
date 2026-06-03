@@ -63,7 +63,7 @@ export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
   });
 
   for (const ev of events) {
-    const payload = ev.payload as DiscordEventPayload;
+    const payload = ev.payload as unknown as DiscordEventPayload;
     const result = await sendDiscordWebhook(config, payload);
 
     if (result.status === "SENT") {
