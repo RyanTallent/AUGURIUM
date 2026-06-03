@@ -8,6 +8,8 @@ import {
   priceAtOrAfter,
   resolveShadowPrice,
   runAllSimulations,
+  shadowEntryMs,
+  updateExcursions,
 } from "@augurium/shadow";
 import {
   bestMarketLatestTrade,
@@ -138,13 +140,24 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
       });
       if (existing) continue;
 
+      const activeDuplicate = await prisma.shadowTrade.findFirst({
+        where: {
+          marketId: signal.marketId,
+          side: signal.side,
+          signalType: signal.signalType,
+          status: "OPEN",
+        },
+        select: { id: true },
+      });
+      if (activeDuplicate) continue;
+
       const sources = await loadShadowPriceSources({
         marketId: signal.marketId,
         conditionId: signal.conditionId,
         outcomeSide: signal.side,
       });
       const bestTrade = bestMarketLatestTrade(sources);
-      const entryMs = signal.createdAt.getTime() + DEFAULT_ENTRY_DELAY_MS;
+      const entryMs = shadowEntryMs(signal.createdAt, DEFAULT_ENTRY_DELAY_MS);
       const entryResolved = resolveShadowPrice({
         entryMs: signal.createdAt.getTime(),
         entryPrice: 0,
@@ -187,6 +200,10 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         0,
         signal.side,
       );
+      const withExcursions = updateExcursions(
+        { ...metrics, maxFavorableExcursion: 0, maxAdverseExcursion: 0 },
+        metrics.roi,
+      );
 
       const shadow = await prisma.shadowTrade.create({
         data: {
@@ -194,6 +211,7 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
           marketId: signal.marketId,
           conditionId: signal.conditionId,
           side: signal.side,
+          signalType: signal.signalType,
           entryDelayMs: DEFAULT_ENTRY_DELAY_MS,
           simulatedEntryPrice: entryPrice,
           currentPrice: postEntry.currentPrice,
@@ -205,8 +223,8 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
           status: "OPEN",
           entryReasoning: signal.reasoning,
           latestReasoning: signal.reasoning,
-          maxFavorableExcursion: 0,
-          maxAdverseExcursion: 0,
+          maxFavorableExcursion: withExcursions.maxFavorableExcursion,
+          maxAdverseExcursion: withExcursions.maxAdverseExcursion,
           priceStatus: postEntry.priceStatus,
           priceSource: postEntry.priceSource,
           lastPriceUpdateAt: postEntry.lastPriceUpdateAt,

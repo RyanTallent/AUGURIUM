@@ -15,7 +15,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
-    "test": "npx tsx --test src/intelligence.test.ts src/evidence.test.ts"
+    "test": "npx tsx --test src/intelligence.test.ts src/evidence.test.ts src/classification-gates.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

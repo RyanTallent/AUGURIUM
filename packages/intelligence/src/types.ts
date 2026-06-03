@@ -66,6 +66,9 @@ export interface MarketSignalEvaluation {
   alphaScore: number;
   systemConfidenceScore: number;
   signalType: SignalType;
+  baseSignalType: SignalType;
+  promotionReasons: string[];
+  classificationMeta: Record<string, unknown>;
   reasoning: string;
   skipReason: string | null;
   evidenceWindowMinutes: number;

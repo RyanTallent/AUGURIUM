@@ -45,6 +45,10 @@
     "verify:categories": "node scripts/verify-categories.mjs",
     "verify:scoring-quality": "node scripts/verify-scoring-quality.mjs",
     "verify:signal-quality": "node scripts/verify-signal-quality.mjs",
+    "verify:shadow-audit": "node scripts/verify-shadow-audit.mjs",
+    "verify:shadow-duplicates": "node scripts/verify-shadow-duplicates.mjs",
+    "verify:readiness": "npm run build:database && node scripts/verify-readiness.mjs",
+    "backfill:shadow-signal-type": "node scripts/backfill-shadow-signal-type.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },

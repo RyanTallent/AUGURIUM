@@ -2,7 +2,11 @@ export type DiscordEventStatus = "PENDING" | "SENT" | "SKIPPED" | "FAILED";
 
 export type DiscordEventType =
   | "SIGNAL_ALERT"
+  | "HIGH_CONVICTION_SIGNAL"
+  | "TRADE_NOW"
   | "SHADOW_OPENED"
+  | "SHADOW_WINNER"
+  | "SHADOW_LOSER"
   | "SHADOW_PARTIAL_PROFIT"
   | "SHADOW_RUNNER_CREATED"
   | "SHADOW_RUNNER_EXIT"

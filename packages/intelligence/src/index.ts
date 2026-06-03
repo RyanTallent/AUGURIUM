@@ -11,5 +11,6 @@ export * from "./watchlist.js";
 export * from "./reasoning.js";
 export * from "./pipeline.js";
 export * from "./evidence.js";
+export * from "./classification-gates.js";
 export { computeSystemConfidenceBreakdown } from "./system-confidence.js";
 export { getSignalWindowMinutes } from "./pipeline.js";

@@ -63,7 +63,7 @@ export function resolveShadowPrice(input: ResolveShadowPriceInput): ResolveShado
   }
 
   const latest = latestOnTape(input.tape);
-  if (latest && latest.price > 0) {
+  if (latest && latest.price > 0 && latest.tradedAt.getTime() >= entryMs) {
     return freshTapeResult(latest, now, staleAfterMs);
   }
 

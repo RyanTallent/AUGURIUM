@@ -15,3 +15,32 @@ export {
   parseShadowSyncRunOutcome,
   type ShadowSyncRunOutcome,
 } from "./shadow-sync-health.js";
+export {
+  computeShadowAnalytics,
+  type ShadowAnalyticsReport,
+} from "./shadow-analytics.js";
+export {
+  auditShadowDuplicates,
+  type ShadowDuplicateReport,
+} from "./shadow-duplicates.js";
+export {
+  computeSignalValidation,
+  type SignalValidationReport,
+} from "./signal-validation.js";
+export {
+  computeTraderReliability,
+  type TraderReliabilityReport,
+} from "./trader-reliability.js";
+export {
+  computePortfolioValidation,
+  type PortfolioValidationReport,
+  type ReadinessGrade,
+} from "./portfolio-validation.js";
+export {
+  computePaperValidation,
+  type PaperValidationReport,
+} from "./paper-validation.js";
+export {
+  computeLiveTradingReadiness,
+  type LiveTradingReadinessReport,
+} from "./readiness-report.js";

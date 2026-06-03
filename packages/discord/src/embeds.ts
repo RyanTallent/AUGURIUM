@@ -28,6 +28,7 @@ export function buildSignalAlertEmbed(input: {
   systemConfidenceScore: number;
   triggerTraders: string[];
   reasoning: string;
+  whySummary?: string;
   dashboardUrl: string;
 }): DiscordEventPayload {
   const traders =
@@ -53,6 +54,9 @@ export function buildSignalAlertEmbed(input: {
       { name: "Confidence", value: input.systemConfidenceScore.toFixed(0), inline: true },
       { name: "Trigger traders", value: traders.slice(0, 900) },
       { name: "Reasoning", value: input.reasoning.slice(0, 900) },
+      ...(input.whySummary
+        ? [{ name: "Why", value: input.whySummary.slice(0, 900) }]
+        : []),
       { name: "Dashboard", value: input.dashboardUrl },
     ],
   });
@@ -66,6 +70,7 @@ export function buildShadowEmbed(input: {
   roiPct: number;
   pnlUsd: number;
   mfePct?: number;
+  whySummary?: string;
   dashboardUrl: string;
 }): DiscordEventPayload {
   return payload({
@@ -79,6 +84,9 @@ export function buildShadowEmbed(input: {
       { name: "Sim. PnL", value: `$${input.pnlUsd.toFixed(2)}`, inline: true },
       ...(input.mfePct != null
         ? [{ name: "MFE", value: `${input.mfePct.toFixed(1)}%`, inline: true }]
+        : []),
+      ...(input.whySummary
+        ? [{ name: "Why", value: input.whySummary.slice(0, 900) }]
         : []),
       { name: "Dashboard", value: input.dashboardUrl },
     ],

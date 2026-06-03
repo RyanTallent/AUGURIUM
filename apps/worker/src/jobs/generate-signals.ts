@@ -1,4 +1,4 @@
-import { prisma } from "@augurium/database";
+import { prisma, Prisma } from "@augurium/database";
 import {
   evaluateMarketSignals,
   type ConsensusTradeInput,
@@ -225,6 +225,10 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
             side: ev.outcomeSide,
             outcome: ev.outcomeSide,
             signalType: ev.signalType,
+            baseSignalType: ev.baseSignalType,
+            skipReason: ev.skipReason,
+            promotionReasons: ev.promotionReasons,
+            classificationMeta: ev.classificationMeta as Prisma.InputJsonValue,
             consensusScore: ev.consensus.consensusScore,
             alphaScore: ev.alphaScore,
             marketQualityScore: ev.marketQualityScore,

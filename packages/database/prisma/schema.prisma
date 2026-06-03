@@ -259,6 +259,10 @@ model Signal {
   reasoning             String    @default("")
   confidence            Float     @default(0)
   rationale             String    @default("")
+  baseSignalType        String?
+  skipReason            String?
+  promotionReasons      String[]  @default([])
+  classificationMeta    Json?
   status                String    @default("active")
   createdAt             DateTime  @default(now())
   expiresAt             DateTime?
@@ -283,6 +287,7 @@ model ShadowTrade {
   marketId              String
   conditionId           String?
   side                  String
+  signalType            String    @default("RESEARCH")
   entryDelayMs          Int       @default(180000)
   simulatedEntryPrice   Float
   currentPrice          Float
@@ -317,6 +322,7 @@ model ShadowTrade {
   @@index([marketId])
   @@index([status])
   @@index([roi])
+  @@index([marketId, side, signalType, status])
 }
 
 model SimulationResult {

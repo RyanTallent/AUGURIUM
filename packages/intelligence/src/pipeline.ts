@@ -1,10 +1,9 @@
 import { computeAlphaScore, computeCapitalEfficiency, computeMovementConfirmation } from "./alpha.js";
 import { computeMarketConsensusBySide } from "./consensus.js";
-import { applyEvidenceToSignalType, evaluateSignalEvidence } from "./evidence.js";
 import { computeMarketQualityScore } from "./market-quality.js";
 import { buildSignalReasoning } from "./reasoning.js";
 import { computeSystemConfidenceScore } from "./system-confidence.js";
-import { classifySignalType } from "./watchlist.js";
+import { classifyMarketSignal } from "./classification-gates.js";
 import { safeDivide } from "./math.js";
 import type {
   ConsensusTradeInput,
@@ -72,6 +71,9 @@ export function evaluateMarketSignals(
       alphaScore: 0,
       systemConfidenceScore,
       signalType: "IGNORE",
+      baseSignalType: "IGNORE",
+      promotionReasons: ["no-outcome-activity"],
+      classificationMeta: { gatesFailed: ["no-outcome-activity"] },
       reasoning: buildSignalReasoning({
         signalType: "IGNORE",
         outcomeSide: "UNKNOWN",
@@ -129,7 +131,7 @@ export function evaluateMarketSignals(
       consensus.copyabilityScore < 0.12 ||
       (consensus.combinedNotional < 200 && !hasSuperElite);
 
-    const baseType = classifySignalType({
+    const watchlistInput = {
       consensusScore: consensus.consensusScore,
       alphaScore,
       marketQualityScore,
@@ -138,21 +140,25 @@ export function evaluateMarketSignals(
       insufficientData,
       uniqueTraders,
       disagreementScore: consensus.disagreementScore,
+    };
+
+    const classified = classifyMarketSignal({
+      watchlist: watchlistInput,
+      evidence: {
+        consensus,
+        marketQualityScore,
+        systemConfidenceScore,
+        hasSuperElite,
+      },
+      insufficientDataForced: insufficientData,
+      skipReason: insufficientData ? "insufficient-data" : null,
     });
 
-    const evidence = evaluateSignalEvidence({
-      consensus,
-      marketQualityScore,
-      systemConfidenceScore,
-      hasSuperElite,
-    });
-
-    const signalType = applyEvidenceToSignalType(baseType, evidence);
-
-    const forcedType =
-      insufficientData && signalType === "TRADE_NOW" ? "RESEARCH" : signalType;
-
-    const evidenceNote = evidence.downgradeReason;
+    const forcedType = classified.finalSignalType;
+    const evidenceNote =
+      classified.promotionReasons.length > 0
+        ? `Promotion blocked: ${classified.promotionReasons.join(", ")}`
+        : null;
 
     evaluations.push({
       marketId,
@@ -165,6 +171,9 @@ export function evaluateMarketSignals(
       alphaScore,
       systemConfidenceScore,
       signalType: forcedType,
+      baseSignalType: classified.baseSignalType,
+      promotionReasons: classified.promotionReasons,
+      classificationMeta: classified.classificationMeta,
       reasoning: buildSignalReasoning({
         signalType: forcedType,
         outcomeSide: consensus.outcomeSide,

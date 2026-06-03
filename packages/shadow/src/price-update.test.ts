@@ -20,7 +20,7 @@ describe("shadow price updates", () => {
     assert.ok(result.currentPrice > 0.4);
   });
 
-  it("marks fresh from latest market tape when post-entry tape is empty", () => {
+  it("does not mark from pre-entry tape (avoids flat ROI)", () => {
     const entryMs = Date.parse("2026-06-01T14:00:00Z");
     const result = resolveShadowPrice({
       entryMs,
@@ -29,9 +29,8 @@ describe("shadow price updates", () => {
       tape: [{ tradedAt: new Date("2026-06-01T12:30:00Z"), price: 0.42 }],
       now: new Date("2026-06-01T12:35:00Z"),
     });
-    assert.equal(result.priceStatus, "FRESH");
-    assert.equal(result.currentPrice, 0.42);
-    assert.ok(result.lastPriceUpdateAt);
+    assert.equal(result.currentPrice, 0.45);
+    assert.equal(result.priceSource, "ENTRY_FALLBACK");
   });
 
   it("reports no price source without tape", () => {

@@ -4,11 +4,12 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** First tape price at or after targetMs; null if no post-target trade exists. */
 export function priceAtOrAfter(tape: TapePoint[], targetMs: number): number | null {
   for (const p of tape) {
     if (p.tradedAt.getTime() >= targetMs) return p.price;
   }
-  return tape.length ? tape[tape.length - 1].price : null;
+  return null;
 }
 
 export function directionalRoi(

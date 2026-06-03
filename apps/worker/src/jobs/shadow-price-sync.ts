@@ -4,6 +4,7 @@ import {
   applyAuguriumExitRules,
   computePositionMetrics,
   resolveShadowPrice,
+  shadowEntryMs,
   updateExcursions,
 } from "@augurium/shadow";
 import { buildBatchPriceContext, bestMarketLatestTrade } from "../lib/shadow-batch-context.js";
@@ -315,7 +316,7 @@ export async function runShadowPriceSync(
         try {
           const sources = ctx.sourcesFor(shadow);
           const bestTrade = bestMarketLatestTrade(sources);
-          const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
+          const entryMs = shadowEntryMs(shadow.signal.createdAt, shadow.entryDelayMs);
           const priced = resolveShadowPrice({
             entryMs,
             entryPrice: shadow.simulatedEntryPrice,

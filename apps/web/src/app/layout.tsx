@@ -29,6 +29,9 @@ export default function RootLayout({
           <a href="/signals">Signals</a>
           <a href="/traders">Traders</a>
           <a href="/shadow">Shadow</a>
+          <a href="/shadow/analytics">Shadow analytics</a>
+          <a href="/signals/validation">Signal validation</a>
+          <a href="/readiness">Readiness</a>
           <a href="/simulations">Simulations</a>
           <a href="/replay">Replay</a>
           <a href="/portfolio">Portfolio</a>

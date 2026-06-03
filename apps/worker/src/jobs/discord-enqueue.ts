@@ -46,6 +46,13 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
     });
 
     for (const s of signals) {
+      const whySummary =
+        s.signalType === "TRADE_NOW"
+          ? `Consensus ${s.consensusScore.toFixed(0)}, alpha ${s.alphaScore.toFixed(0)}, ${s.triggerTraderWallets.length} scored traders, $${s.triggerNotional.toFixed(0)} notional`
+          : s.promotionReasons.length > 0
+            ? `Blocked: ${s.promotionReasons.join(", ")}`
+            : s.reasoning.slice(0, 200);
+
       const status = await queueDiscordEvent({
         eventType: "SIGNAL_ALERT",
         dedupeKey: `signal:alert:${s.id}`,
@@ -60,11 +67,35 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
           systemConfidenceScore: s.systemConfidenceScore,
           triggerTraders: s.triggerTraderWallets,
           reasoning: s.reasoning,
+          whySummary,
           dashboardUrl: `${base}/signals`,
         }),
       });
       if (status === "PENDING") queued++;
       else skipped++;
+
+      if (s.signalType === "TRADE_NOW") {
+        const hc = await queueDiscordEvent({
+          eventType: "HIGH_CONVICTION_SIGNAL",
+          dedupeKey: `signal:high-conviction:${s.id}`,
+          title: `HIGH_CONVICTION: ${s.market.title}`,
+          payload: buildSignalAlertEmbed({
+            marketTitle: s.market.title,
+            side: s.side,
+            signalType: "TRADE_NOW",
+            consensusScore: s.consensusScore,
+            alphaScore: s.alphaScore,
+            marketQualityScore: s.marketQualityScore,
+            systemConfidenceScore: s.systemConfidenceScore,
+            triggerTraders: s.triggerTraderWallets,
+            reasoning: s.reasoning,
+            whySummary,
+            dashboardUrl: `${base}/signals`,
+          }),
+        });
+        if (hc === "PENDING") queued++;
+        else skipped++;
+      }
     }
 
     const shadows = await prisma.shadowTrade.findMany({
@@ -153,6 +184,46 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
       }
 
       if (sh.status === "CLOSED" || sh.status === "EXPIRED") {
+        if (roiPct >= 5) {
+          const win = await queueDiscordEvent({
+            eventType: "SHADOW_WINNER",
+            dedupeKey: `shadow:winner:${sh.id}`,
+            title: `Shadow winner +${roiPct.toFixed(1)}%`,
+            payload: buildShadowEmbed({
+              title: "✅ SHADOW_WINNER (simulation)",
+              description: sh.latestReasoning.slice(0, 400),
+              marketTitle: sh.market.title,
+              side: sh.side,
+              roiPct,
+              pnlUsd: pnl,
+              mfePct: sh.maxFavorableExcursion * 100,
+              whySummary: `Closed ${sh.status} with +${roiPct.toFixed(1)}% ROI — ${sh.latestReasoning.slice(0, 120)}`,
+              dashboardUrl: `${base}/shadow/analytics`,
+            }),
+          });
+          if (win === "PENDING") queued++;
+          else skipped++;
+        } else if (roiPct <= -5) {
+          const loss = await queueDiscordEvent({
+            eventType: "SHADOW_LOSER",
+            dedupeKey: `shadow:loser:${sh.id}`,
+            title: `Shadow loser ${roiPct.toFixed(1)}%`,
+            payload: buildShadowEmbed({
+              title: "❌ SHADOW_LOSER (simulation)",
+              description: sh.latestReasoning.slice(0, 400),
+              marketTitle: sh.market.title,
+              side: sh.side,
+              roiPct,
+              pnlUsd: pnl,
+              mfePct: sh.maxFavorableExcursion * 100,
+              whySummary: `Closed ${sh.status} with ${roiPct.toFixed(1)}% ROI — ${sh.latestReasoning.slice(0, 120)}`,
+              dashboardUrl: `${base}/shadow/analytics`,
+            }),
+          });
+          if (loss === "PENDING") queued++;
+          else skipped++;
+        }
+
         const ct = await queueDiscordEvent({
           eventType: "SHADOW_CLOSED",
           dedupeKey: `shadow:closed:${sh.id}`,
