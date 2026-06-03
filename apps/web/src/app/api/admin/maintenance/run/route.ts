@@ -16,5 +16,11 @@ export async function POST(request: Request) {
     runId: result.result.runId,
     status: result.result.status,
     reportPath: result.result.reportWritten,
+    tokenConfigured: Boolean(process.env.MAINTENANCE_ADMIN_TOKEN?.trim()),
+    before: result.result.before,
+    after: result.result.after,
+    repairsApplied: result.result.steps
+      .filter((s) => s.status === "ok")
+      .map((s) => ({ name: s.name, detail: s.detail })),
   });
 }

@@ -14,6 +14,7 @@ import { runDiscordDispatchJob } from "../jobs/discord-dispatch.js";
 import { runPortfolioEngineJob } from "../jobs/run-portfolio-engine.js";
 import { runExecutionEngineJob } from "../jobs/run-execution-engine.js";
 import { runMaintenanceDailyJob } from "../jobs/run-maintenance-daily.js";
+import { runCopyPaperJob } from "../jobs/run-copy-paper.js";
 import { processDiscordNotifications } from "../engines/discord.js";
 
 export type JobCounts = Record<string, string | number | boolean>;
@@ -113,6 +114,15 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         status: String(s.status ?? "unknown"),
         categoriesUpdated: Number(s.categoriesUpdated ?? 0),
         liveTradingReady: Boolean(s.liveTradingReady),
+      };
+    }
+    case QUEUES.COPY_PAPER_SYNC: {
+      const s = await runCopyPaperJob();
+      return {
+        enabled: s.enabled,
+        copyEnabled: s.copyEnabled,
+        opened: s.opened,
+        closed: s.closed,
       };
     }
     default:

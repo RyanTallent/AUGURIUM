@@ -5,6 +5,13 @@ import {
 } from "@augurium/database";
 import { prisma } from "@augurium/database";
 
+export function getMaintenanceAdminConfig(): {
+  tokenConfigured: boolean;
+} {
+  const expected = (process.env.MAINTENANCE_ADMIN_TOKEN ?? "").trim();
+  return { tokenConfigured: expected.length > 0 };
+}
+
 export function verifyMaintenanceAdminToken(request: Request): boolean {
   const expected = (process.env.MAINTENANCE_ADMIN_TOKEN ?? "").trim();
   if (!expected) return false;

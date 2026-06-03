@@ -1,6 +1,6 @@
 # PRODUCTION RECOVERY REPORT
 
-Generated: 2026-06-03T22:41:59.492Z
+Generated: 2026-06-03T23:51:21.242Z
 Mode: **LIVE REPAIR**
 
 ## Verdict
@@ -17,7 +17,7 @@ Run npm run recovery:production before enabling paper execution.
 |--------|--------|-------|
 | Readiness score | 38 | 38 |
 | Impossible PnL | 0 | 0 |
-| ROI anomalies | 7 | 7 |
+| ROI anomalies | 0 | 0 |
 | invalid_for_analytics | 26 | 26 |
 | Duplicate active groups | 0 | 0 |
 | Category coverage % | 67.6 | 67.6 |
@@ -31,14 +31,16 @@ Run npm run recovery:production before enabling paper execution.
 ## Maintenance
 
 Status: success
+- fix_impossible_flat_pnl: ok
 - orphan_shadow_runs: ok
 - duplicate_shadow_cleanup: ok
 - shadow_payout_reconcile: ok
+- shadow_trust_repair: ok
 
 ## Ingestion health
 
 Healthy: false
-- 788 ingestion run(s) failed in the last 24h
+- 788 ingestion run(s) failed in the last 24h (historical; new pagination exhaustion resets do not increment this)
 
 ## Shadow trust
 
@@ -71,11 +73,6 @@ Zero accepts is expected when signals are RESEARCH/WATCHLIST, scores below thres
 - Blocks paper: YES
 - Blocks live: YES
 - Action: npm run maintenance:production
-### ROI anomalies: 7
-- Root cause: Forensics flagged corrupt/outlier ROI beyond threshold.
-- Blocks paper: YES
-- Blocks live: YES
-- Action: npm run reconcile:shadow-payouts
 ### Invalid for analytics: 26
 - Root cause: Unreconcilable or corrupt rows flagged invalid_for_analytics.
 - Blocks paper: YES
@@ -95,7 +92,6 @@ Zero accepts is expected when signals are RESEARCH/WATCHLIST, scores below thres
 ## Why live trading is not ready
 
 - Shadow analytics not trustworthy
-- ROI anomalies: 7
 - Invalid for analytics: 26
 - Paper validation 0 / 100
 

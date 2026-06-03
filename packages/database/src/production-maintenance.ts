@@ -12,6 +12,7 @@ import {
   fixImpossibleFlatPnl,
   reconcileShadowPayouts,
 } from "./maintenance-repairs.js";
+import { repairShadowTrustAnomalies } from "./shadow-trust-repair.js";
 import {
   markOrphanedShadowPortfolioRuns,
   markStaleRunningIngestionRuns,
@@ -133,6 +134,12 @@ export async function runProductionMaintenance(
       name: "shadow_payout_reconcile",
       status: dryRun ? "dry_run" : "ok",
       detail: { ...(await reconcileShadowPayouts(dryRun)) },
+    });
+
+    steps.push({
+      name: "shadow_trust_repair",
+      status: dryRun ? "dry_run" : "ok",
+      detail: { ...(await repairShadowTrustAnomalies(dryRun)) },
     });
 
     const after = await collectMaintenanceMetrics();

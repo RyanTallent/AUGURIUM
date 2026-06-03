@@ -49,6 +49,8 @@ envVarGroups:
         value: "false"
       - key: ALLOW_REAL_MONEY
         value: "false"
+      - key: PAPER_COPY_ENABLED
+        value: "false"
       - key: DISCORD_ENABLED
         sync: false
       - key: DISCORD_WEBHOOK_URL

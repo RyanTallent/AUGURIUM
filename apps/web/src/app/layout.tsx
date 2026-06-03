@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AUGURIUM",
-  description: "Prediction Market Intelligence Platform",
+  description: "Trader copy and risk management for prediction markets",
 };
 
 export default function RootLayout({
@@ -24,6 +24,8 @@ export default function RootLayout({
           }}
         >
           <a href="/">Dashboard</a>
+          <a href="/copy">Copy</a>
+          <a href="/copy-portfolios">Copy portfolios</a>
           <a href="/overview">Overview</a>
           <a href="/markets">Markets</a>
           <a href="/signals">Signals</a>

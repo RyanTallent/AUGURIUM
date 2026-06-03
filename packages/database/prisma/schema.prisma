@@ -39,6 +39,7 @@ model Market {
   portfolioDecisions   PortfolioDecision[]
   executionOrders      ExecutionOrder[]
   executionPositions   ExecutionPosition[]
+  copyPaperPositions   CopyPaperPosition[]
 }
 
 model Trader {
@@ -71,6 +72,8 @@ model Trader {
   metricsSnapshots     TraderMetricsSnapshot[]
   scoreHistory         TraderScoreHistory[]
   tierHistory          TraderTierHistory[]
+  copyControl          CopyTraderControl?
+  copyPaperPositions   CopyPaperPosition[]
 }
 
 model TraderMetricsSnapshot {
@@ -653,4 +656,46 @@ model ExecutionReconciliation {
   lastCheckedAt    DateTime @default(now())
   mismatchDetails  Json?
   updatedAt        DateTime @updatedAt
+}
+
+/// Trader-copy paper mirror (no live capital)
+model CopyTraderControl {
+  id               String   @id @default(cuid())
+  traderId         String   @unique
+  copyDecision     String
+  copyScore        Float
+  riskScore        Float
+  expectedValue    Float
+  enabled          Boolean  @default(false)
+  disabledReason   String?
+  strengths        String[] @default([])
+  weaknesses       String[] @default([])
+  evaluatedAt      DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+}
+
+model CopyPaperPosition {
+  id                 String    @id @default(cuid())
+  traderId           String
+  sourcePositionKey  String    @unique
+  marketId           String
+  side               String
+  status             String    @default("OPEN")
+  mirroredSizeUsd    Float
+  entryPrice         Float
+  currentPrice       Float
+  unrealizedPnl      Float     @default(0)
+  realizedPnl        Float     @default(0)
+  roi                Float     @default(0)
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([traderId, status])
+  @@index([marketId])
 }

@@ -17,6 +17,7 @@ export const QUEUE_JOB_NAMES: Record<string, string> = {
   [QUEUES.POSITION_RECONSTRUCT]: "position:reconstruct",
   [QUEUES.EXECUTION_RUN]: "execution:run",
   [QUEUES.MAINTENANCE_DAILY]: "maintenance:daily",
+  [QUEUES.COPY_PAPER_SYNC]: "copy:paper-sync",
 };
 
 /** Default interval between periodic runs (ms). */
@@ -36,6 +37,7 @@ const DEFAULT_INTERVAL_MS: Record<string, number> = {
   [QUEUES.PORTFOLIO_RUN]: 300_000,
   [QUEUES.EXECUTION_RUN]: 600_000,
   [QUEUES.MAINTENANCE_DAILY]: 86_400_000,
+  [QUEUES.COPY_PAPER_SYNC]: 300_000,
 };
 
 export const PERIODIC_ANALYSIS_QUEUES = [

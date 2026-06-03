@@ -10,6 +10,7 @@
     "test": "npx tsx --test src/jobs/score-traders-select.test.ts src/lib/shadow-sync-batch.test.ts src/lib/polymarket-pagination.test.ts"
   },
   "dependencies": {
+    "@augurium/copy-trading": "*",
     "@augurium/database": "*",
     "@augurium/intelligence": "*",
     "@augurium/discord": "*",

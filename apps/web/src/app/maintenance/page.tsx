@@ -151,6 +151,17 @@ export default async function MaintenancePage() {
 
       <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Admin API (token required)</h2>
       <p style={{ fontSize: "0.9rem" }}>
+        Token on this host:{" "}
+        <strong
+          className={
+            process.env.MAINTENANCE_ADMIN_TOKEN?.trim() ? styles.ok : styles.warn
+          }
+        >
+          {process.env.MAINTENANCE_ADMIN_TOKEN?.trim() ? "configured" : "not set"}
+        </strong>
+        . Status JSON: <a href="/api/admin/maintenance/status">/api/admin/maintenance/status</a>
+      </p>
+      <p style={{ fontSize: "0.9rem" }}>
         Set <code>MAINTENANCE_ADMIN_TOKEN</code> on the <strong>web</strong> service. One run at a
         time. Does not enable live trading.
       </p>

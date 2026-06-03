@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run build -w @augurium/shared && npm run build -w @augurium/database && next build",
+    "build": "npm run build -w @augurium/shared && npm run build -w @augurium/shadow && npm run build -w @augurium/copy-trading && npm run build -w @augurium/database && next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "@augurium/copy-trading": "*",
     "@augurium/database": "*",
     "@augurium/shared": "*",
     "next": "^15.3.3",

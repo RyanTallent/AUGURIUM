@@ -49,6 +49,8 @@ export const QUEUES = {
   EXECUTION_RUN: "execution:run",
   /** Production self-healing (daily) */
   MAINTENANCE_DAILY: "maintenance:daily",
+  /** Paper mirror of COPY-rated trader positions */
+  COPY_PAPER_SYNC: "copy:paper-sync",
   /** @deprecated use DISCORD_ENQUEUE + DISCORD_DISPATCH */
   DISCORD_NOTIFY: "discord:notify",
 } as const;
@@ -86,6 +88,9 @@ export const EXECUTION_QUEUES = [QUEUES.EXECUTION_RUN] as const;
 
 export const MAINTENANCE_QUEUES = [QUEUES.MAINTENANCE_DAILY] as const;
 
+/** Copy-trading paper mirror */
+export const COPY_TRADING_QUEUES = [QUEUES.COPY_PAPER_SYNC] as const;
+
 /** Phase A + B + C + D + E + F + G worker tick queues */
 export const WORKER_QUEUES = [
   ...INGESTION_QUEUES,
@@ -96,6 +101,7 @@ export const WORKER_QUEUES = [
   ...PORTFOLIO_QUEUES,
   ...EXECUTION_QUEUES,
   ...MAINTENANCE_QUEUES,
+  ...COPY_TRADING_QUEUES,
 ] as const;
 
 export type TraderTierLabel =

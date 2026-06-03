@@ -116,3 +116,9 @@ export {
   runProductionRecovery,
   type ProductionRecoveryResult,
 } from "./production-recovery.js";
+export {
+  repairShadowTrustAnomalies,
+  buildShadowTrustRepairReport,
+  type ShadowTrustRepairResult,
+  type ShadowTrustRepairReport,
+} from "./shadow-trust-repair.js";
