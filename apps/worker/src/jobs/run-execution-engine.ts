@@ -431,6 +431,7 @@ async function processExits(
         signalExpired: signal?.expiresAt ? signal.expiresAt < new Date() : false,
         signalInactive: signal?.status !== "active",
         marketClosed: pos.market.closed,
+        marketResolved: pos.market.resolved ?? false,
         consensusCollapsed: signal?.status !== "active",
       },
     );

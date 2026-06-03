@@ -40,6 +40,7 @@ export interface ExitDecision {
   runnerActive: boolean;
   missedProfitAfterExit: number;
   wouldHaveBeenBetterToHold: boolean;
+  payoutFormula?: string;
 }
 
 export interface SimulationInput {

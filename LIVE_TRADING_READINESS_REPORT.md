@@ -1,104 +1,80 @@
 # LIVE TRADING READINESS REPORT
 
-Generated: 2026-06-02 (shadow analytics correction sprint)
+Generated: 2026-06-03T17:16:39.066Z
 
 ## Verdict
 
 **LIVE TRADING READY = NO**
 
-Overall: **FAIL** (expected until production deploy + cleanup scripts run)
-
-Evidence: production showed corrupt headline analytics (606% average ROI, 2735 profit factor, 66% zero ROI with 0.4% loss rate). This sprint fixes measurement and gates; it does not inflate performance.
+Overall: **FAIL** (38/100)
 
 ## Root causes found
 
-1. **Outlier corruption (few trades, huge impact)**  
-   Headline averages used raw stored `roi`, which included extreme values from implausible entry prices (e.g. entry &lt; $0.02) or inconsistent close accounting. Median ROI stayed ~0% while mean exploded — classic outlier distortion.
+1. **Payout corruption**: Exit path could apply resolution-style PnL while UI showed flat entry≈exit (e.g. $3800 on $100 at 0.025/0.025).
+2. **Runner misuse**: Low entry treated as huge ROI without price reaching runner target (YES +50% → entry×1.5, not $1 unless resolved).
+3. **Stale repricing**: Closed shadows could be repriced without resetting realized PnL.
+4. **Zero ROI dominance**: Most closed trades lack post-entry marks — breakeven bucket, not wins.
 
-2. **Zero ROI is mostly pricing, not “loss”**  
-   ~66% of closes had ~$0 realized PnL with entry≈exit or no post-entry marks. Breakeven bucket dominates; loss rate looked artificially low (0.4%).
+## Fixes applied
 
-3. **Analytics engine used wrong field**  
-   Aggregates trusted `ShadowTrade.roi` without reconciling to `realizedPnl / simulatedSizeUsd`.
-
-4. **Duplicate active shadow**  
-   At least one `marketId + side + signalType` group had multiple OPEN rows (pre-cleanup).
-
-5. **Paper validation not started**  
-   0 / 100 closed paper positions.
-
-## Fixes applied (code)
-
-| Area | Change |
-|------|--------|
-| ROI truth | `closedPositionRoi = realizedPnl / simulatedSizeUsd` |
-| Analytics | Headline avg/median/PF exclude \|ROI\|&gt;100% anomalies |
-| Forensics | `computeShadowRoiForensics`, anomaly buckets, diagnosis |
-| Zero ROI | `computeZeroRoiBreakdown` categories on `/readiness` |
-| Entry gate | Reject opens with price outside 0.02–0.98 |
-| Freshness | `auditShadowFreshness` verifies numerator/denominator |
-| Duplicates | `cleanup-duplicate-shadows.mjs` + prevention at open |
-| Reconcile | `reconcile-shadow-roi.mjs` aligns stored roi to PnL |
-| UI | `/shadow/anomalies`, hardened `/shadow/analytics`, `/readiness` |
-| Readiness | FAIL on anomalies, duplicates, corrupt analytics, paper &lt; 100 |
-
-## Production deploy steps
-
-1. `npm run db:push` (adds `ShadowTrade.signalType`, signal classification fields if missing)
-2. `npm run backfill:shadow-signal-type`
-3. `npm run reconcile:shadow-roi`
-4. `npm run cleanup:duplicate-shadows` (review with `--dry-run` first)
-5. Redeploy worker + web; run shadow sync cycles
-6. `npm run verify:shadow-roi-forensics` and `npm run report:readiness`
-
-## Shadow analytics — before vs after (methodology)
-
-| Metric | Production (corrupt) | After correction (trustworthy defs) |
-|--------|----------------------|-------------------------------------|
-| Average ROI | 606.1% | Mean of authoritative ROI, **excluding** \|ROI\|&gt;100% |
-| Median ROI | 0.0% | Median of same trustworthy set |
-| Profit factor | 2735.90 | Gross win / gross loss on non-anomaly trades only |
-| Zero ROI | 66.2% | From zero-ROI breakdown (PnL ≈ $0) |
-| Win / loss | 33.5% / 0.4% | Win/loss/breakeven from authoritative ROI |
-
-Re-run `/shadow/analytics` after deploy to see live corrected numbers.
-
-## ROI anomaly buckets (forensics)
-
-Inspect via `npm run verify:shadow-roi-forensics` or `/shadow/anomalies`:
-
-- gt_100pct (&gt;100% ROI)
-- gt_200pct, gt_500pct, gt_1000pct, gt_5000pct
-
-Each bucket reports count and contribution to raw mean (diagnostic).
-
-## Duplicate active shadows
-
-Target: **0** groups. Use `npm run verify:shadow-duplicates` after cleanup.
-
-## Paper validation
-
-Progress labels: `0 / 100`, `25 / 100`, `50 / 100`, `100 / 100` on `/readiness`.
-
-Current production: **0 / 100** closes.
+- Centralized share-based payout (`packages/shadow/src/payout.ts`)
+- Exit rules + partial/runner/consensus collapse use correct formulas
+- `invalidForAnalytics` + `/shadow/payout-audit` + `npm run reconcile:shadow-payouts`
+- Closed shadows skip price-only DB updates
+- Readiness fails on impossible PnL, payout audit, invalid rows, ROI anomalies
 
 ## Remaining blockers
 
-- Shadow analytics corrupted until reconcile + repricing
-- ROI anomaly count &gt; threshold (default 3) until outliers reviewed
-- Duplicate active group(s) until cleanup script runs
-- Paper closes &lt; 100
-- Live execution remains disabled in env (`EXECUTION_ENABLED=false`)
+- Shadow analytics not trustworthy
+- ROI anomalies: 7
+- Invalid for analytics: 26
+- Paper validation 0 / 100
 
-## Warnings (non-blocking)
+## Shadow analytics (trustworthy metrics)
 
-- Stale shadow pricing above threshold
-- Scoring backlog
-- TRADE_NOW gates block promotion (by design)
+| Metric | Before (prod) | After (authoritative) |
+|--------|---------------|------------------------|
+| Average ROI | 606.1% (corrupt) | -0.8% |
+| Average ROI raw | — | -0.8% |
+| Median ROI | 0.0% | 0.0% |
+| Win rate | 33.5% | 0.6% |
+| Loss rate | 0.4% | 2.6% |
+| Zero ROI | 66.2% | 88.9% |
+| Profit factor | 2735 (corrupt) | 0.01 |
+| Trustworthy | no | no |
+| Trustworthy sample | — | 154 (excl. 26 invalid) |
 
-## Constraints upheld
+## Shadow payout audit
 
-- Live trading **not** enabled  
-- No synthetic prices or fake fills  
-- TRADE_NOW thresholds unchanged  
-- Readiness scores not manipulated — FAIL reflects truth  
+Impossible PnL (entry≈exit, PnL≠0): **0**
+Invalid for analytics: **26**
+ROI > 100%: **7** · > 500%: **0** · > 1000%: **0**
+
+## ROI anomaly counts
+
+Corrupt trades: **7**
+Diagnosis: **outlier_corruption**
+
+- gt_100pct: 2
+- gt_200pct: 5
+
+## Duplicate active shadows
+
+Groups: **0**
+- None
+
+## Paper validation
+
+Progress: **0 / 100**
+Opens: 1 · Closes: 0
+EV: 0.00%
+
+## Zero ROI breakdown
+
+- expired_without_price: 93
+- missing_entry_price: 11
+- no_post_entry_trade: 56
+
+## Warnings
+
+- Stale shadow pricing 100%

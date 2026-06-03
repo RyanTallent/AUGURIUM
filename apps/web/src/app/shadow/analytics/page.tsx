@@ -25,7 +25,7 @@ export default async function ShadowAnalyticsPage() {
           </p>
           <h1>Shadow portfolio analytics</h1>
           <p className={styles.hint}>
-            Trustworthy metrics use realizedPnl ÷ notional; outliers (&gt;100% ROI) excluded from headline averages
+            Cleaned metrics exclude invalid_for_analytics and share-based payout outliers
           </p>
         </div>
         {report && (
@@ -40,17 +40,18 @@ export default async function ShadowAnalyticsPage() {
       ) : (
         <>
           <section className={styles.grid}>
-            <Metric label="Sample" value={String(report.sampleSize)} />
+            <Metric label="Trustworthy sample" value={String(report.trustworthySampleCount)} />
+            <Metric label="Invalid excluded" value={String(report.invalidExcludedCount)} warn />
             <Metric label="Win rate" value={pct(report.winRate)} />
             <Metric label="Loss rate" value={pct(report.lossRate)} />
             <Metric label="Breakeven" value={pct(report.breakevenRate)} />
-            <Metric label="Avg ROI (trustworthy)" value={pct(report.averageRoi)} />
-            <Metric label="Avg ROI (raw diagnostic)" value={pct(report.averageRoiRaw)} warn />
+            <Metric label="Cleaned avg ROI" value={pct(report.averageRoi)} />
+            <Metric label="Raw avg ROI (diag)" value={pct(report.averageRoiRaw)} warn />
             <Metric label="Median ROI" value={pct(report.medianRoi)} />
             <Metric label="Profit factor" value={report.profitFactor.toFixed(2)} />
             <Metric label="ROI anomalies" value={String(report.corruptRoiCount)} warn />
+            <Metric label="Payout audit" value={report.payoutAuditPass ? "PASS" : "FAIL"} />
             <Metric label="Zero ROI" value={pct(report.zeroRoiClosedPct)} warn />
-            <Metric label="Forensics" value={report.forensicsDiagnosis} />
           </section>
 
           <h2 style={{ marginTop: "2rem", fontSize: "1rem" }}>Zero ROI breakdown</h2>
@@ -65,7 +66,8 @@ export default async function ShadowAnalyticsPage() {
           </ul>
 
           <p style={{ marginTop: "1.5rem" }}>
-            <Link href="/shadow/anomalies">View anomalies & forensic rows →</Link>
+            <Link href="/shadow/payout-audit">Payout audit →</Link> ·{" "}
+            <Link href="/shadow/anomalies">Anomalies →</Link>
           </p>
         </>
       )}

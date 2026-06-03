@@ -126,13 +126,7 @@ function buildRowUpdate(
   };
 
   if (shadow.status !== "OPEN") {
-    if (basePriceFieldsUnchanged(shadow, priced)) {
-      return { update: null, closed: false };
-    }
-    return {
-      update: { id: shadow.id, data: baseUpdate },
-      closed: false,
-    };
+    return { update: null, closed: false };
   }
 
   let state = computePositionMetrics(
@@ -161,6 +155,7 @@ function buildRowUpdate(
       signalExpired: signal.expiresAt ? signal.expiresAt < now : false,
       signalInactive: signal.status !== "active",
       marketClosed: signal.market.closed || signal.market.resolved,
+      marketResolved: signal.market.resolved,
       consensusCollapsed: signal.status !== "active" || signal.consensusScore < 40,
     },
     shadow.entryReasoning,
@@ -203,6 +198,10 @@ function buildRowUpdate(
       ? {
           status: decision.status,
           closedAt: now,
+          closeReason: decision.closeReason,
+          payoutFormula: decision.payoutFormula ?? "mark_to_market",
+          payoutDiagnostic: null,
+          invalidForAnalytics: false,
           missedProfitAfterExit: decision.missedProfitAfterExit,
           wouldHaveBeenBetterToHold: decision.wouldHaveBeenBetterToHold,
         }

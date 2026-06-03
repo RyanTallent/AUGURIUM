@@ -7,6 +7,7 @@ import {
 } from "@augurium/shadow";
 import { computeShadowRoiForensics } from "./shadow-roi-forensics.js";
 import { computeZeroRoiBreakdown, type ZeroRoiBreakdown } from "./shadow-zero-roi.js";
+import { countImpossiblePnl } from "./shadow-payout-audit.js";
 
 export interface ShadowAnalyticsReport {
   sampleSize: number;
@@ -31,7 +32,10 @@ export interface ShadowAnalyticsReport {
   zeroRoiClosedPct: number;
   zeroMfePct: number;
   corruptRoiCount: number;
+  invalidExcludedCount: number;
+  trustworthySampleCount: number;
   analyticsTrustworthy: boolean;
+  payoutAuditPass: boolean;
   anomalyCounts: Record<RoiAnomalyKey, number>;
   zeroRoiBreakdown: ZeroRoiBreakdown;
   forensicsDiagnosis: string;
@@ -57,14 +61,21 @@ function stdDev(values: number[]): number {
 }
 
 export async function computeShadowAnalytics(): Promise<ShadowAnalyticsReport> {
-  const [openCount, closedCount, expiredCount, trades, forensics, zeroRoiBreakdown] =
+  const [openCount, closedCount, expiredCount, invalidExcludedCount, impossibleBefore, trades, forensics, zeroRoiBreakdown] =
     await Promise.all([
       prisma.shadowTrade.count({ where: { status: "OPEN" } }),
       prisma.shadowTrade.count({ where: { status: "CLOSED" } }),
       prisma.shadowTrade.count({ where: { status: "EXPIRED" } }),
+      prisma.shadowTrade.count({
+        where: { status: { in: ["CLOSED", "EXPIRED"] }, invalidForAnalytics: true },
+      }),
+      countImpossiblePnl(),
       prisma.shadowTrade.findMany({
-        where: { status: { in: ["CLOSED", "EXPIRED"] } },
-        select: {
+      where: {
+        status: { in: ["CLOSED", "EXPIRED"] },
+        invalidForAnalytics: false,
+      },
+      select: {
           roi: true,
           realizedPnl: true,
           unrealizedPnl: true,
@@ -163,11 +174,17 @@ export async function computeShadowAnalytics(): Promise<ShadowAnalyticsReport> {
 
   const analyticsTrustworthy =
     corruptRoiCount <= Math.max(2, Math.floor(trades.length * 0.01)) &&
+    impossibleBefore === 0 &&
+    invalidExcludedCount <= Math.max(5, Math.floor((trades.length + invalidExcludedCount) * 0.05)) &&
     zeroRoiClosed < 0.55 &&
     Math.abs(avgRaw - avgTrust) < 0.15;
 
+  const payoutAuditPass = impossibleBefore === 0 && corruptRoiCount === 0;
+
   return {
-    sampleSize: trades.length,
+    sampleSize: trades.length + invalidExcludedCount,
+    trustworthySampleCount: trades.length,
+    invalidExcludedCount,
     openCount,
     closedCount,
     expiredCount,
@@ -188,6 +205,7 @@ export async function computeShadowAnalytics(): Promise<ShadowAnalyticsReport> {
     zeroRoiClosedPct: zeroRoiClosed,
     zeroMfePct: zeroMfe,
     corruptRoiCount,
+    payoutAuditPass,
     analyticsTrustworthy,
     anomalyCounts: anomalySummary.counts,
     zeroRoiBreakdown,

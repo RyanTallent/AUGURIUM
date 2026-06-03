@@ -12,14 +12,16 @@ const { computeShadowAnalytics } = require("../packages/database/dist/shadow-ana
 const { computeShadowRoiForensics } = require("../packages/database/dist/shadow-roi-forensics.js");
 const { auditShadowDuplicates } = require("../packages/database/dist/shadow-duplicates.js");
 const { computePaperValidation } = require("../packages/database/dist/paper-validation.js");
+const { computeShadowPayoutAudit } = require("../packages/database/dist/shadow-payout-audit.js");
 
 async function main() {
-  const [readiness, shadow, forensics, dups, paper] = await Promise.all([
+  const [readiness, shadow, forensics, dups, paper, payout] = await Promise.all([
     computeLiveTradingReadiness(),
     computeShadowAnalytics(),
     computeShadowRoiForensics(),
     auditShadowDuplicates(),
     computePaperValidation(),
+    computeShadowPayoutAudit(200),
   ]);
 
   const lines = [
@@ -35,18 +37,18 @@ async function main() {
     "",
     "## Root causes found",
     "",
-    "1. **Outlier corruption**: A small number of trades with implausible entry prices or stale instantaneous ROI stored on close inflated mean ROI (606% avg vs 0% median).",
-    "2. **Zero ROI dominance**: ~66% of closed trades show flat entry≈exit or no post-entry price updates — breakeven bucket, not losses.",
-    "3. **Analytics used raw stored `roi`**: Included corrupt outliers in averages and profit factor.",
+    "1. **Payout corruption**: Exit path could apply resolution-style PnL while UI showed flat entry≈exit (e.g. $3800 on $100 at 0.025/0.025).",
+    "2. **Runner misuse**: Low entry treated as huge ROI without price reaching runner target (YES +50% → entry×1.5, not $1 unless resolved).",
+    "3. **Stale repricing**: Closed shadows could be repriced without resetting realized PnL.",
+    "4. **Zero ROI dominance**: Most closed trades lack post-entry marks — breakeven bucket, not wins.",
     "",
     "## Fixes applied",
     "",
-    "- Authoritative ROI = `realizedPnl / simulatedSizeUsd` for all analytics",
-    "- Anomaly exclusion from headline averages (|ROI|>100%)",
-    "- Entry price plausibility gate (0.02–0.98) on new shadows",
-    "- ROI forensics + zero-ROI classification + freshness audit",
-    "- Duplicate shadow cleanup script",
-    "- Stricter readiness FAIL gates",
+    "- Centralized share-based payout (`packages/shadow/src/payout.ts`)",
+    "- Exit rules + partial/runner/consensus collapse use correct formulas",
+    "- `invalidForAnalytics` + `/shadow/payout-audit` + `npm run reconcile:shadow-payouts`",
+    "- Closed shadows skip price-only DB updates",
+    "- Readiness fails on impossible PnL, payout audit, invalid rows, ROI anomalies",
     "",
     "## Remaining blockers",
     "",
@@ -66,6 +68,13 @@ async function main() {
     `| Zero ROI | 66.2% | ${(shadow.zeroRoiClosedPct * 100).toFixed(1)}% |`,
     `| Profit factor | 2735 (corrupt) | ${shadow.profitFactor.toFixed(2)} |`,
     `| Trustworthy | no | ${shadow.analyticsTrustworthy ? "yes" : "no"} |`,
+    `| Trustworthy sample | — | ${shadow.trustworthySampleCount} (excl. ${shadow.invalidExcludedCount} invalid) |`,
+    "",
+    "## Shadow payout audit",
+    "",
+    `Impossible PnL (entry≈exit, PnL≠0): **${payout.impossiblePnlCount}**`,
+    `Invalid for analytics: **${payout.invalidCount}**`,
+    `ROI > 100%: **${payout.roiGt100}** · > 500%: **${payout.roiGt500}** · > 1000%: **${payout.roiGt1000}**`,
     "",
     "## ROI anomaly counts",
     "",

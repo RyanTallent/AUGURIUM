@@ -310,6 +310,10 @@ model ShadowTrade {
   lastPriceUpdateAt     DateTime?
   priceCheckedAt        DateTime?
   priceCheckReason      String?
+  closeReason           String?
+  payoutFormula         String?
+  payoutDiagnostic      String?
+  invalidForAnalytics   Boolean   @default(false)
   createdAt             DateTime  @default(now())
   closedAt              DateTime?
   updatedAt             DateTime  @updatedAt

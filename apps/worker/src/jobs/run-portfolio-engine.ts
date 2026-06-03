@@ -134,6 +134,7 @@ export async function runPortfolioEngineJob(): Promise<PortfolioEngineSummary> {
             : false,
           signalInactive: pos.signal.status !== "active",
           marketClosed: pos.market.closed ?? false,
+          marketResolved: pos.market.resolved ?? false,
           consensusCollapsed: pos.signal.status !== "active",
         },
         config,

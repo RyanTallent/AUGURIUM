@@ -17,10 +17,9 @@ export default async function ReadinessPage() {
       <header className={styles.header}>
         <div>
           <p className={styles.kicker}>
-            <Link href="/">AUGURIUM</Link> / Live trading readiness
+            <Link href="/">AUGURIUM</Link> / Readiness
           </p>
-          <h1>Readiness report</h1>
-          <p className={styles.hint}>Proof-oriented gates — live trading stays OFF until blockers clear</p>
+          <h1>Live trading readiness</h1>
         </div>
         {report && (
           <span className={report.overallGrade === "PASS" ? styles.ok : styles.warn}>
@@ -30,7 +29,7 @@ export default async function ReadinessPage() {
       </header>
 
       {!report ? (
-        <p className={styles.warn}>Unable to load readiness report.</p>
+        <p className={styles.warn}>Unable to load readiness.</p>
       ) : (
         <>
           <section className={styles.grid}>
@@ -39,32 +38,41 @@ export default async function ReadinessPage() {
               <strong className={report.liveTradingReady ? styles.ok : styles.warn}>
                 {report.liveTradingReady ? "YES" : "NO"}
               </strong>
-              <p className={styles.hint} style={{ marginTop: "0.5rem" }}>
-                Gates {report.liveTradingReady ? "cleared" : "blocked"} — EXECUTION_ENABLED stays off
-              </p>
             </div>
             <div className={styles.card}>
-              <span className={styles.kicker}>Paper validation</span>
+              <span className={styles.kicker}>Payout audit</span>
+              <strong className={report.shadowPayoutAuditPass ? styles.ok : styles.warn}>
+                {report.shadowPayoutAuditPass ? "PASS" : "FAIL"}
+              </strong>
+            </div>
+            <div className={styles.card}>
+              <span className={styles.kicker}>Impossible PnL</span>
+              <strong className={report.impossiblePnlCount === 0 ? styles.ok : styles.warn}>
+                {report.impossiblePnlCount}
+              </strong>
+            </div>
+            <div className={styles.card}>
+              <span className={styles.kicker}>Invalid rows</span>
+              <strong>{report.invalidForAnalyticsCount}</strong>
+            </div>
+            <div className={styles.card}>
+              <span className={styles.kicker}>Paper</span>
               <strong>{report.paperProgressLabel}</strong>
             </div>
             <div className={styles.card}>
-              <span className={styles.kicker}>ROI anomalies</span>
-              <strong className={report.roiAnomalyCount > 0 ? styles.warn : styles.ok}>
-                {report.roiAnomalyCount}
-              </strong>
+              <span className={styles.kicker}>Cleaned avg ROI</span>
+              <strong>{(report.cleanedAverageRoi * 100).toFixed(1)}%</strong>
             </div>
             <div className={styles.card}>
-              <span className={styles.kicker}>Duplicate shadow groups</span>
+              <span className={styles.kicker}>Median ROI</span>
+              <strong>{(report.medianRoi * 100).toFixed(1)}%</strong>
+            </div>
+            <div className={styles.card}>
+              <span className={styles.kicker}>Duplicate groups</span>
               <strong
-                className={report.duplicateActiveGroups > 0 ? styles.warn : styles.ok}
+                className={report.duplicateActiveGroups === 0 ? styles.ok : styles.warn}
               >
                 {report.duplicateActiveGroups}
-              </strong>
-            </div>
-            <div className={styles.card}>
-              <span className={styles.kicker}>Shadow analytics</span>
-              <strong className={report.shadowAnalyticsTrustworthy ? styles.ok : styles.warn}>
-                {report.shadowAnalyticsTrustworthy ? "Trustworthy" : "Corrupted"}
               </strong>
             </div>
           </section>
@@ -93,32 +101,22 @@ export default async function ReadinessPage() {
             </>
           )}
 
-          {report.warnings.length > 0 && (
-            <>
-              <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Warnings</h2>
-              <ul>
-                {report.warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            </>
-          )}
-
           <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Sections</h2>
           <div className={styles.grid}>
             {report.sections.map((s) => (
               <div key={s.name} className={styles.card}>
                 <span className={styles.kicker}>{s.name}</span>
-                <strong className={s.grade === "PASS" ? styles.ok : styles.warn}>{s.grade}</strong>
+                <strong className={s.grade === "PASS" ? styles.ok : styles.warn}>
+                  {s.grade}
+                </strong>
                 <p style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>{s.summary}</p>
               </div>
             ))}
           </div>
 
-          <p style={{ marginTop: "2rem", fontSize: "0.8rem", opacity: 0.7 }}>
-            <Link href="/shadow/analytics">Shadow analytics</Link> ·{" "}
-            <Link href="/shadow/anomalies">Anomalies</Link> ·{" "}
-            <Link href="/signals/validation">Signal validation</Link>
+          <p style={{ marginTop: "2rem", fontSize: "0.8rem" }}>
+            <Link href="/shadow/payout-audit">Payout audit</Link> ·{" "}
+            <Link href="/shadow/analytics">Analytics</Link>
           </p>
         </>
       )}

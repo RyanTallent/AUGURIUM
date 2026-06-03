@@ -35,6 +35,12 @@ export {
   type ShadowFreshnessAudit,
 } from "./shadow-freshness-audit.js";
 export {
+  computeShadowPayoutAudit,
+  countImpossiblePnl,
+  type ShadowPayoutAuditReport,
+  type PayoutAuditRow,
+} from "./shadow-payout-audit.js";
+export {
   auditShadowDuplicates,
   type ShadowDuplicateReport,
 } from "./shadow-duplicates.js";

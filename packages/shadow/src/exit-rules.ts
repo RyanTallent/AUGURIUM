@@ -1,13 +1,20 @@
 import {
   PARTIAL_EXIT_FRACTION,
-  PARTIAL_EXIT_ROI,
-  RUNNER_EXIT_ROI,
   RUNNER_FRACTION,
   type ExitDecision,
   type ShadowPositionState,
   type ShadowStatus,
 } from "./types.js";
-import { directionalRoi, pnlFromRoi } from "./math.js";
+import {
+  inferResolutionMode,
+  markToMarketPnl,
+  priceHitsPartialTarget,
+  priceHitsRunnerTarget,
+  pnlForCloseLeg,
+  roiFromPnl,
+  selectCloseFormula,
+  type PayoutFormula,
+} from "./payout.js";
 import { closedPositionRoi } from "./roi.js";
 
 export interface ExitContext {
@@ -16,6 +23,7 @@ export interface ExitContext {
   signalExpired: boolean;
   signalInactive: boolean;
   marketClosed: boolean;
+  marketResolved: boolean;
   consensusCollapsed: boolean;
 }
 
@@ -38,8 +46,19 @@ export function computePositionMetrics(
   realizedPnl: number,
   outcomeSide: string,
 ): ShadowPositionState {
-  const roi = directionalRoi(entryPrice, currentPrice, outcomeSide);
-  const unrealizedPnl = pnlFromRoi(roi, sizeUsd, positionRemaining);
+  const legFraction = Math.max(0, Math.min(1, positionRemaining));
+  const unrealizedPnl = markToMarketPnl({
+    entryPrice,
+    exitPrice: currentPrice,
+    costBasis: sizeUsd,
+    outcomeSide,
+    positionFraction: legFraction,
+  });
+  const legBasis = sizeUsd * legFraction;
+  const roi = legBasis > 0 ? unrealizedPnl / legBasis : 0;
+  const totalBasis = sizeUsd;
+  const markRoi = roiFromPnl(realizedPnl + unrealizedPnl, totalBasis);
+
   return {
     simulatedEntryPrice: entryPrice,
     currentPrice,
@@ -48,14 +67,30 @@ export function computePositionMetrics(
     realizedPnl,
     partialExitDone: positionRemaining <= RUNNER_FRACTION + 0.001,
     runnerActive: positionRemaining > 0 && positionRemaining <= RUNNER_FRACTION + 0.001,
-    roi,
+    roi: markRoi,
     unrealizedPnl,
     maxFavorableExcursion: 0,
     maxAdverseExcursion: 0,
   };
 }
 
-/** Augurium shadow exit: 85% at +20% ROI, 15% runner until +50% or exit triggers. */
+function directionalRoiForExcursion(
+  entryPrice: number,
+  currentPrice: number,
+  outcomeSide: string,
+): number {
+  if (entryPrice <= 0) return 0;
+  const pnl = markToMarketPnl({
+    entryPrice,
+    exitPrice: currentPrice,
+    costBasis: 1,
+    outcomeSide,
+    positionFraction: 1,
+  });
+  return pnl;
+}
+
+/** Augurium shadow exit: share-based PnL; runner/partial use price targets. */
 export function applyAuguriumExitRules(
   state: ShadowPositionState,
   ctx: ExitContext,
@@ -70,30 +105,44 @@ export function applyAuguriumExitRules(
     maxAdverseExcursion,
   } = state;
 
-  const roi = directionalRoi(
-    state.simulatedEntryPrice,
-    ctx.currentPrice,
-    ctx.outcomeSide,
-  );
-  maxFavorableExcursion = Math.max(maxFavorableExcursion, roi);
-  maxAdverseExcursion = Math.min(maxAdverseExcursion, roi);
+  const entry = state.simulatedEntryPrice;
+  const exit = ctx.currentPrice;
+  const basis = state.simulatedSizeUsd;
+  const side = ctx.outcomeSide;
+
+  const excursionRoi = directionalRoiForExcursion(entry, exit, side);
+  maxFavorableExcursion = Math.max(maxFavorableExcursion, excursionRoi);
+  maxAdverseExcursion = Math.min(maxAdverseExcursion, excursionRoi);
 
   if (
     !partialExitDone &&
-    positionRemaining > RUNNER_FRACTION &&
-    roi >= PARTIAL_EXIT_ROI
+    positionRemaining > RUNNER_FRACTION + 0.001 &&
+    priceHitsPartialTarget(entry, exit, side)
   ) {
-    realizedPnl += pnlFromRoi(roi, state.simulatedSizeUsd, PARTIAL_EXIT_FRACTION);
+    const partialPnl = markToMarketPnl({
+      entryPrice: entry,
+      exitPrice: exit,
+      costBasis: basis,
+      outcomeSide: side,
+      positionFraction: PARTIAL_EXIT_FRACTION,
+    });
+    realizedPnl += partialPnl;
     positionRemaining = RUNNER_FRACTION;
     partialExitDone = true;
     runnerActive = true;
   }
 
-  const unrealizedPnl = pnlFromRoi(roi, state.simulatedSizeUsd, positionRemaining);
+  const unrealizedPnl = markToMarketPnl({
+    entryPrice: entry,
+    exitPrice: exit,
+    costBasis: basis,
+    outcomeSide: side,
+    positionFraction: positionRemaining,
+  });
+
   const updated: ShadowPositionState = {
     ...state,
-    currentPrice: ctx.currentPrice,
-    roi,
+    currentPrice: exit,
     unrealizedPnl,
     realizedPnl,
     positionRemaining,
@@ -101,32 +150,56 @@ export function applyAuguriumExitRules(
     runnerActive,
     maxFavorableExcursion,
     maxAdverseExcursion,
+    roi: roiFromPnl(realizedPnl + unrealizedPnl, basis),
   };
 
   let closeReason: string | null = null;
   let status: ShadowStatus = "OPEN";
+  let formula: PayoutFormula = "mark_to_market";
 
-  if (ctx.marketClosed) {
-    closeReason = "market closed or resolved";
+  const resolution = inferResolutionMode(exit, side);
+  const resolvedMarket = ctx.marketResolved && ctx.marketClosed;
+
+  if (resolvedMarket && resolution !== "mark_only") {
+    closeReason = "market resolved";
     status = "CLOSED";
+    formula = resolution === "winner" ? "resolved_winner" : "resolved_loser";
+  } else if (ctx.marketClosed && !ctx.marketResolved) {
+    closeReason = "market closed";
+    status = "CLOSED";
+    formula = "mark_to_market";
   } else if (ctx.signalExpired) {
     closeReason = "signal expired";
     status = "EXPIRED";
+    formula = "mark_to_market";
   } else if (ctx.consensusCollapsed) {
     closeReason = "consensus collapsed (signal inactive)";
     status = "CLOSED";
-  } else if (runnerActive && roi >= RUNNER_EXIT_ROI) {
-    closeReason = "runner target +50% ROI";
+    formula = "mark_to_market";
+  } else if (runnerActive && priceHitsRunnerTarget(entry, exit, side)) {
+    closeReason = "runner target +50% price";
     status = "CLOSED";
+    formula = "runner_mark";
   }
 
   if (closeReason) {
     if (positionRemaining > 0) {
-      realizedPnl += pnlFromRoi(roi, state.simulatedSizeUsd, positionRemaining);
+      const legFormula = selectCloseFormula(closeReason, resolvedMarket, exit, side);
+      const closePnl = pnlForCloseLeg(legFormula, {
+        entryPrice: entry,
+        exitPrice: exit,
+        costBasis: basis,
+        outcomeSide: side,
+        positionFraction: positionRemaining,
+      });
+      realizedPnl += closePnl;
       positionRemaining = 0;
+      formula = legFormula;
     }
-    const totalRoi = closedPositionRoi(realizedPnl, state.simulatedSizeUsd);
-    const missed = Math.max(0, maxFavorableExcursion - totalRoi) * state.simulatedSizeUsd;
+
+    const totalRoi = closedPositionRoi(realizedPnl, basis);
+    const missed = Math.max(0, maxFavorableExcursion * basis - realizedPnl);
+
     return {
       state: {
         ...updated,
@@ -144,12 +217,12 @@ export function applyAuguriumExitRules(
         positionRemaining: 0,
         partialExitDone,
         runnerActive: false,
-        missedProfitAfterExit: missed,
-        wouldHaveBeenBetterToHold: missed > state.simulatedSizeUsd * 0.05,
+        missedProfitAfterExit: Math.max(0, missed),
+        wouldHaveBeenBetterToHold: missed > basis * 0.05,
+        payoutFormula: formula,
       },
     };
   }
 
   return { state: updated, decision: null };
 }
-

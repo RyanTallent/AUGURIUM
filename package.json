@@ -50,6 +50,7 @@
     "verify:readiness": "npm run build:database && node scripts/verify-readiness.mjs",
     "verify:shadow-roi-forensics": "npm run build:database && node scripts/verify-shadow-roi-forensics.mjs",
     "reconcile:shadow-roi": "node scripts/reconcile-shadow-roi.mjs",
+    "reconcile:shadow-payouts": "npm run build --workspace=@augurium/shadow && node scripts/reconcile-shadow-payouts.mjs",
     "cleanup:duplicate-shadows": "node scripts/cleanup-duplicate-shadows.mjs",
     "report:readiness": "npm run build:database && node scripts/generate-readiness-report.mjs",
     "backfill:shadow-signal-type": "node scripts/backfill-shadow-signal-type.mjs",
