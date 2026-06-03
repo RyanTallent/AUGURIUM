@@ -70,6 +70,8 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         staleCount: s.staleCount,
         shadowTotal: s.shadowTotal,
         timedOut: s.timedOut,
+        partialTimeout: s.partialTimeout,
+        unchangedSkipped: s.unchangedSkipped,
         durationMs: s.durationMs,
         created: s.created,
       };

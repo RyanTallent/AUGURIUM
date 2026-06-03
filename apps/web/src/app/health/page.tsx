@@ -32,8 +32,18 @@ export default async function ProductionHealthPage() {
             JSON API: <a href="/api/health/production">/api/health/production</a>
           </p>
         </div>
-        <span className={health.scoringHealthy ? styles.ok : styles.warn}>
-          Scoring {health.scoringHealthy ? "healthy" : "backlog"}
+        <span
+          className={
+            health.scoringHealthy && health.shadowSyncRunAcceptable
+              ? styles.ok
+              : styles.warn
+          }
+        >
+          {health.shadowSyncPartialTimeout
+            ? "Shadow sync partial (runtime cap)"
+            : health.scoringHealthy
+              ? "Healthy"
+              : "Needs attention"}
         </span>
       </header>
 

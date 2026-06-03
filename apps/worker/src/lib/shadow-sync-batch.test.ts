@@ -51,11 +51,9 @@ describe("shadow sync batch selection", () => {
     );
   });
 
-  it("returns 500 when SHADOW_MAX_UPDATE=1 but SHADOW_SYNC_BATCH_SIZE unset", () => {
-    assert.equal(
-      resolveShadowSyncBatchSize({ SHADOW_MAX_UPDATE: "1" }),
-      500,
-    );
+  it("defaults to 250 when SHADOW_SYNC_BATCH_SIZE unset", () => {
+    assert.equal(resolveShadowSyncBatchSize({}), 250);
+    assert.equal(resolveShadowSyncBatchSize({ SHADOW_MAX_UPDATE: "1" }), 250);
   });
 
   it("honors SHADOW_SYNC_BATCH_SIZE", () => {

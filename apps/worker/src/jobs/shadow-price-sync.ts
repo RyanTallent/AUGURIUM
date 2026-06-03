@@ -1,4 +1,5 @@
 import { prisma } from "@augurium/database";
+import type { Prisma } from "@augurium/database";
 import {
   applyAuguriumExitRules,
   computePositionMetrics,
@@ -12,6 +13,11 @@ import {
 } from "../lib/ingestion-run-lifecycle.js";
 import { priceCheckReasonForResult } from "../lib/shadow-price-sources.js";
 import {
+  basePriceFieldsUnchanged,
+  openPositionFieldsUnchanged,
+  type ShadowRowUpdate,
+} from "../lib/shadow-sync-update.js";
+import {
   resolveShadowSyncBatchSize,
   selectShadowSyncBatch,
 } from "../lib/shadow-sync-batch.js";
@@ -20,9 +26,10 @@ const SHADOW_STALE_AFTER_MS = Number(
   process.env.SHADOW_PRICE_STALE_MS ?? String(6 * 60 * 60 * 1000),
 );
 const SHADOW_SYNC_MAX_RUNTIME_MS = Number(
-  process.env.SHADOW_SYNC_MAX_RUNTIME_MS ?? "120000",
+  process.env.SHADOW_SYNC_MAX_RUNTIME_MS ?? "180000",
 );
-const SHADOW_SYNC_CHUNK_SIZE = Number(process.env.SHADOW_SYNC_CHUNK_SIZE ?? "50");
+const SHADOW_SYNC_CHUNK_SIZE = Number(process.env.SHADOW_SYNC_CHUNK_SIZE ?? "25");
+const UPDATE_CONCURRENCY = Number(process.env.SHADOW_SYNC_UPDATE_CONCURRENCY ?? "12");
 
 export class ShadowSyncTimeoutError extends Error {
   constructor(message = "shadow sync max runtime exceeded") {
@@ -36,6 +43,7 @@ export interface ShadowPriceSyncStats {
   selectedCount: number;
   processedCount: number;
   updatedCount: number;
+  unchangedSkipped: number;
   closedCount: number;
   freshCount: number;
   staleCount: number;
@@ -47,6 +55,7 @@ export interface ShadowPriceSyncStats {
   chunkCount: number;
   durationMs: number;
   timedOut: boolean;
+  partialTimeout: boolean;
 }
 
 function tallyStatus(
@@ -65,6 +74,7 @@ function progressPayload(stats: ShadowPriceSyncStats, extra: Record<string, unkn
     selected: stats.selectedCount,
     processed: stats.processedCount,
     updated: stats.updatedCount,
+    unchangedSkipped: stats.unchangedSkipped,
     fresh: stats.freshCount,
     stale: stats.staleCount,
     noSource: stats.noSourceCount,
@@ -73,6 +83,8 @@ function progressPayload(stats: ShadowPriceSyncStats, extra: Record<string, unkn
     errors: stats.errorCount,
     batchSize: stats.batchSize,
     chunkSize: stats.chunkSize,
+    timedOut: stats.timedOut,
+    partialTimeout: stats.partialTimeout,
     ...extra,
   };
 }
@@ -86,34 +98,23 @@ async function loadShadowChunk(ids: string[]) {
   });
 }
 
-async function processShadowRow(
-  shadow: ShadowWithSignal,
-  ctx: Awaited<ReturnType<typeof buildBatchPriceContext>>,
-  stats: ShadowPriceSyncStats,
-  now: Date,
-): Promise<void> {
-  const sources = ctx.sourcesFor(shadow);
-  const bestTrade = bestMarketLatestTrade(sources);
-  const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
-  const priced = resolveShadowPrice({
-    entryMs,
-    entryPrice: shadow.simulatedEntryPrice,
-    side: shadow.side,
-    tape: sources.tape,
-    marketLatestTrade: bestTrade,
-    marketSnapshotPrice: sources.marketSnapshotPrice,
-    lastKnownPrice: shadow.currentPrice,
-    now,
-    staleAfterMs: SHADOW_STALE_AFTER_MS,
-  });
-  tallyStatus(priced.priceStatus, stats);
-  const checkReason = priceCheckReasonForResult(
-    priced,
-    bestTrade?.reason ?? null,
-    SHADOW_STALE_AFTER_MS,
-    now,
-  );
+async function flushShadowUpdates(updates: ShadowRowUpdate[]): Promise<void> {
+  if (updates.length === 0) return;
+  const limit = Math.max(1, UPDATE_CONCURRENCY);
+  for (let i = 0; i < updates.length; i += limit) {
+    const slice = updates.slice(i, i + limit);
+    await Promise.all(
+      slice.map((u) => prisma.shadowTrade.update({ where: { id: u.id }, data: u.data })),
+    );
+  }
+}
 
+function buildRowUpdate(
+  shadow: ShadowWithSignal,
+  priced: ReturnType<typeof resolveShadowPrice>,
+  checkReason: string,
+  now: Date,
+): { update: ShadowRowUpdate | null; closed: boolean } {
   const baseUpdate = {
     currentPrice: priced.currentPrice,
     priceStatus: priced.priceStatus,
@@ -124,9 +125,13 @@ async function processShadowRow(
   };
 
   if (shadow.status !== "OPEN") {
-    await prisma.shadowTrade.update({ where: { id: shadow.id }, data: baseUpdate });
-    stats.updatedCount++;
-    return;
+    if (basePriceFieldsUnchanged(shadow, priced)) {
+      return { update: null, closed: false };
+    }
+    return {
+      update: { id: shadow.id, data: baseUpdate },
+      closed: false,
+    };
   }
 
   let state = computePositionMetrics(
@@ -160,10 +165,12 @@ async function processShadowRow(
     shadow.entryReasoning,
   );
 
-  await prisma.shadowTrade.update({
-    where: { id: shadow.id },
-    data: {
-      ...baseUpdate,
+  const nextStatus = decision?.status ?? shadow.status;
+  const nextReasoning = decision?.latestReasoning ?? shadow.latestReasoning;
+
+  if (
+    basePriceFieldsUnchanged(shadow, priced) &&
+    openPositionFieldsUnchanged(shadow, {
       positionRemaining: nextState.positionRemaining,
       unrealizedPnl: nextState.unrealizedPnl,
       realizedPnl: nextState.realizedPnl,
@@ -172,20 +179,58 @@ async function processShadowRow(
       maxAdverseExcursion: nextState.maxAdverseExcursion,
       partialExitDone: nextState.partialExitDone,
       runnerActive: nextState.runnerActive,
-      latestReasoning: decision?.latestReasoning ?? shadow.latestReasoning,
-      ...(decision
-        ? {
-            status: decision.status,
-            closedAt: now,
-            missedProfitAfterExit: decision.missedProfitAfterExit,
-            wouldHaveBeenBetterToHold: decision.wouldHaveBeenBetterToHold,
-          }
-        : {}),
+      latestReasoning: nextReasoning,
+      status: nextStatus,
+    }) &&
+    !decision
+  ) {
+    return { update: null, closed: false };
+  }
+
+  const data: Prisma.ShadowTradeUpdateInput = {
+    ...baseUpdate,
+    positionRemaining: nextState.positionRemaining,
+    unrealizedPnl: nextState.unrealizedPnl,
+    realizedPnl: nextState.realizedPnl,
+    roi: nextState.roi,
+    maxFavorableExcursion: nextState.maxFavorableExcursion,
+    maxAdverseExcursion: nextState.maxAdverseExcursion,
+    partialExitDone: nextState.partialExitDone,
+    runnerActive: nextState.runnerActive,
+    latestReasoning: nextReasoning,
+    ...(decision
+      ? {
+          status: decision.status,
+          closedAt: now,
+          missedProfitAfterExit: decision.missedProfitAfterExit,
+          wouldHaveBeenBetterToHold: decision.wouldHaveBeenBetterToHold,
+        }
+      : {}),
+  };
+
+  return { update: { id: shadow.id, data }, closed: Boolean(decision) };
+}
+
+async function finalizeTimeoutRun(
+  runId: string,
+  stats: ShadowPriceSyncStats,
+  err: ShadowSyncTimeoutError,
+): Promise<void> {
+  stats.partialTimeout = stats.processedCount > 0;
+  const status = stats.partialTimeout ? "success" : "error";
+  await finalizeShadowPortfolioRun(runId, {
+    status,
+    itemCount: stats.processedCount,
+    error: stats.partialTimeout ? undefined : err.message,
+    metadata: {
+      ...progressPayload(stats),
+      timedOut: true,
+      partial: stats.partialTimeout,
+      reason: "max_runtime_exceeded",
+      maxRuntimeMs: SHADOW_SYNC_MAX_RUNTIME_MS,
+      durationMs: stats.durationMs,
     },
   });
-
-  if (decision) stats.closedCount++;
-  else stats.updatedCount++;
 }
 
 /** Reprice up to SHADOW_SYNC_BATCH_SIZE shadow trades with chunking, timeout, and progress writes. */
@@ -203,6 +248,7 @@ export async function runShadowPriceSync(
     selectedCount: 0,
     processedCount: 0,
     updatedCount: 0,
+    unchangedSkipped: 0,
     closedCount: 0,
     freshCount: 0,
     staleCount: 0,
@@ -214,6 +260,7 @@ export async function runShadowPriceSync(
     chunkCount: 0,
     durationMs: 0,
     timedOut: false,
+    partialTimeout: false,
   };
 
   const candidates = await prisma.shadowTrade.findMany({
@@ -257,6 +304,7 @@ export async function runShadowPriceSync(
       const ids = slice.map((s) => s.id);
       const chunkRows = await loadShadowChunk(ids);
       const ctx = await buildBatchPriceContext(chunkRows);
+      const pendingUpdates: ShadowRowUpdate[] = [];
 
       for (const shadow of chunkRows) {
         if (Date.now() >= deadline) {
@@ -265,7 +313,34 @@ export async function runShadowPriceSync(
         }
         stats.processedCount++;
         try {
-          await processShadowRow(shadow, ctx, stats, now);
+          const sources = ctx.sourcesFor(shadow);
+          const bestTrade = bestMarketLatestTrade(sources);
+          const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
+          const priced = resolveShadowPrice({
+            entryMs,
+            entryPrice: shadow.simulatedEntryPrice,
+            side: shadow.side,
+            tape: sources.tape,
+            marketLatestTrade: bestTrade,
+            marketSnapshotPrice: sources.marketSnapshotPrice,
+            lastKnownPrice: shadow.currentPrice,
+            now,
+            staleAfterMs: SHADOW_STALE_AFTER_MS,
+          });
+          tallyStatus(priced.priceStatus, stats);
+          const checkReason = priceCheckReasonForResult(
+            priced,
+            bestTrade?.reason ?? null,
+            SHADOW_STALE_AFTER_MS,
+            now,
+          );
+          const { update, closed } = buildRowUpdate(shadow, priced, checkReason, now);
+          if (update) {
+            pendingUpdates.push(update);
+          } else {
+            stats.unchangedSkipped++;
+          }
+          if (closed) stats.closedCount++;
         } catch (err) {
           stats.errorCount++;
           const message = err instanceof Error ? err.message : String(err);
@@ -273,9 +348,12 @@ export async function runShadowPriceSync(
         }
       }
 
+      await flushShadowUpdates(pendingUpdates);
+      stats.updatedCount += pendingUpdates.length;
+
       const durationMs = Date.now() - startedAt;
       console.log(
-        `[shadow:sync] chunk=${chunkIndex + 1}/${stats.chunkCount} processed=${stats.processedCount} updated=${stats.updatedCount} fresh=${stats.freshCount} stale=${stats.staleCount} noSource=${stats.noSourceCount} noUpdate=${stats.noUpdateCount} errors=${stats.errorCount} durationMs=${durationMs}`,
+        `[shadow:sync] chunk=${chunkIndex + 1}/${stats.chunkCount} processed=${stats.processedCount} updated=${stats.updatedCount} skipped=${stats.unchangedSkipped} fresh=${stats.freshCount} stale=${stats.staleCount} errors=${stats.errorCount} durationMs=${durationMs}`,
       );
 
       if (runId) {
@@ -292,22 +370,9 @@ export async function runShadowPriceSync(
     stats.durationMs = Date.now() - startedAt;
     if (err instanceof ShadowSyncTimeoutError) {
       console.warn(
-        `[shadow:sync] timeout after ${stats.durationMs}ms processed=${stats.processedCount}/${stats.selectedCount}`,
+        `[shadow:sync] timeout after ${stats.durationMs}ms processed=${stats.processedCount}/${stats.selectedCount} partial=${stats.processedCount > 0}`,
       );
-      if (runId) {
-        await finalizeShadowPortfolioRun(runId, {
-          status: "error",
-          itemCount: stats.processedCount,
-          error: err.message,
-          metadata: {
-            ...progressPayload(stats),
-            timedOut: true,
-            reason: "max_runtime_exceeded",
-            maxRuntimeMs: SHADOW_SYNC_MAX_RUNTIME_MS,
-            durationMs: stats.durationMs,
-          },
-        });
-      }
+      if (runId) await finalizeTimeoutRun(runId, stats, err);
       return stats;
     }
     throw err;
@@ -315,7 +380,7 @@ export async function runShadowPriceSync(
 
   stats.durationMs = Date.now() - startedAt;
   console.log(
-    `[shadow:sync] done selected=${stats.selectedCount} processed=${stats.processedCount} updated=${stats.updatedCount} fresh=${stats.freshCount} stale=${stats.staleCount} noSource=${stats.noSourceCount} noUpdate=${stats.noUpdateCount} errors=${stats.errorCount} durationMs=${stats.durationMs}`,
+    `[shadow:sync] done selected=${stats.selectedCount} processed=${stats.processedCount} updated=${stats.updatedCount} skipped=${stats.unchangedSkipped} fresh=${stats.freshCount} stale=${stats.staleCount} durationMs=${stats.durationMs}`,
   );
 
   return stats;

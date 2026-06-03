@@ -24,9 +24,18 @@ async function main() {
       `Scoring backlog: ${health.unscoredEligibleRemaining} eligible unscored (${health.scoreCoverageEligiblePct}% of ${health.eligibleWallets} eligible scored)`,
     );
   }
-  if (health.shadowTotal > 0 && health.shadowFreshPct < 25) {
+  if (
+    health.shadowTotal > 0 &&
+    health.shadowFreshPct < 25 &&
+    health.shadowSyncRunAcceptable
+  ) {
     warnings.push(
       `Shadow price updates mostly stale (${health.shadowFreshPct}% FRESH, ${health.shadowStalePct}% STALE)`,
+    );
+  }
+  if (health.shadowSyncPartialTimeout) {
+    console.warn(
+      `Shadow sync hit runtime cap but processed ${health.latestShadowSyncProcessed ?? 0} trades (partial timeout — not a full failure)`,
     );
   }
 

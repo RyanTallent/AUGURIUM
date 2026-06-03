@@ -10,3 +10,8 @@ export {
   scoringWarningMessage,
   type ScoringHealthMetrics,
 } from "./scoring-health.js";
+export {
+  isShadowSyncRunAcceptable,
+  parseShadowSyncRunOutcome,
+  type ShadowSyncRunOutcome,
+} from "./shadow-sync-health.js";

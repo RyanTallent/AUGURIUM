@@ -1,5 +1,9 @@
 import { prisma } from "./client.js";
 import { computeScoringHealth } from "./scoring-health.js";
+import {
+  isShadowSyncRunAcceptable,
+  parseShadowSyncRunOutcome,
+} from "./shadow-sync-health.js";
 
 export interface ShadowSyncRunStats {
   selected: number | null;
@@ -35,6 +39,8 @@ export interface ProductionHealthReport {
   latestShadowSyncSelected: number | null;
   latestShadowSyncProcessed: number | null;
   latestShadowSyncUpdated: number | null;
+  shadowSyncPartialTimeout: boolean;
+  shadowSyncRunAcceptable: boolean;
   generatedAt: string;
 }
 
@@ -153,6 +159,11 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
 
   const completedStats = parseShadowSyncStats(latestShadowSyncCompleted?.metadata);
   const latestStats = parseShadowSyncStats(latestShadowSyncRun?.metadata);
+  const latestOutcome = parseShadowSyncRunOutcome(
+    mapRun(latestShadowSyncCompleted) ?? mapRun(latestShadowSyncRun),
+  );
+  const shadowSyncPartialTimeout = latestOutcome?.partialTimeout ?? false;
+  const shadowSyncRunAcceptable = isShadowSyncRunAcceptable(latestOutcome);
 
   return {
     walletsTotal,
@@ -182,6 +193,8 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
       null,
     latestShadowSyncUpdated:
       latestStats?.updated ?? completedStats?.updated ?? null,
+    shadowSyncPartialTimeout,
+    shadowSyncRunAcceptable,
     generatedAt: new Date().toISOString(),
   };
 }

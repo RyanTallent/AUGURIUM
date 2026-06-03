@@ -104,7 +104,16 @@ export async function getProductionWarnings(): Promise<ProductionWarnings> {
 
     if (shadowTotal > 0) {
       const freshPct = (shadowFresh / shadowTotal) * 100;
-      if (freshPct < 25) {
+      const latestShadowRun = await prisma.ingestionRun.findFirst({
+        where: { source: "shadow-portfolio", finishedAt: { not: null } },
+        orderBy: { finishedAt: "desc" },
+      });
+      const meta =
+        latestShadowRun?.metadata && typeof latestShadowRun.metadata === "object"
+          ? (latestShadowRun.metadata as Record<string, unknown>)
+          : null;
+      const partialTimeout = meta?.timedOut === true && (meta?.processed as number) > 0;
+      if (freshPct < 25 && !partialTimeout) {
         messages.push(
           `Shadow prices are mostly stale (${freshPct.toFixed(0)}% FRESH). Ensure shadow:sync runs after trade ingest.`,
         );

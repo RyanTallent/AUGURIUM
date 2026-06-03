@@ -15,7 +15,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
-    "test": "npx tsx --test src/scoring-health.test.ts",
+    "test": "npx tsx --test src/scoring-health.test.ts src/shadow-sync-health.test.ts",
     "generate": "prisma generate",
     "push": "prisma db push",
     "studio": "prisma studio",

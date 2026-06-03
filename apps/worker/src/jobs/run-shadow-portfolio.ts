@@ -46,6 +46,8 @@ export interface ShadowPortfolioSummary {
   shadowTotal: number;
   errorCount: number;
   timedOut: boolean;
+  partialTimeout: boolean;
+  unchangedSkipped: number;
   durationMs: number;
 }
 
@@ -69,6 +71,8 @@ function syncToSummary(sync: ShadowPriceSyncStats): ShadowPortfolioSummary {
     shadowTotal: sync.shadowTotal,
     errorCount: sync.errorCount,
     timedOut: sync.timedOut,
+    partialTimeout: sync.partialTimeout,
+    unchangedSkipped: sync.unchangedSkipped,
     durationMs: sync.durationMs,
   };
 }
@@ -95,6 +99,8 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
     chunkCount: 0,
     durationMs: 0,
     timedOut: false,
+    partialTimeout: false,
+    unchangedSkipped: 0,
   });
 
   try {

@@ -6,7 +6,7 @@ export interface ShadowSyncCandidate {
   priceCheckedAt: Date | null;
 }
 
-const DEFAULT_BATCH_SIZE = 500;
+const DEFAULT_BATCH_SIZE = 250;
 const MAX_BATCH_SIZE = 2000;
 
 function statusRank(status: string): number {
@@ -62,7 +62,7 @@ export function resolveShadowSyncBatchSize(
   }
   if (env.SHADOW_MAX_UPDATE != null && env.SHADOW_MAX_UPDATE !== "") {
     console.warn(
-      "[shadow:sync] ignoring deprecated SHADOW_MAX_UPDATE; set SHADOW_SYNC_BATCH_SIZE (default 500)",
+      "[shadow:sync] ignoring deprecated SHADOW_MAX_UPDATE; set SHADOW_SYNC_BATCH_SIZE (default 250)",
     );
   }
   return DEFAULT_BATCH_SIZE;
