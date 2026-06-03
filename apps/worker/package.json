@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "npx tsx --test src/jobs/score-traders-select.test.ts"
+    "test": "npx tsx --test src/jobs/score-traders-select.test.ts src/lib/shadow-sync-batch.test.ts"
   },
   "dependencies": {
     "@augurium/database": "*",

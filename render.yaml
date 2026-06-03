@@ -35,6 +35,8 @@ envVarGroups:
         value: "30000"
       - key: WORKER_INTERVAL_SHADOW_SYNC_MS
         value: "30000"
+      - key: SHADOW_SYNC_BATCH_SIZE
+        value: "500"
       - key: EXECUTION_ENABLED
         value: "false"
       - key: EXECUTION_PROVIDER

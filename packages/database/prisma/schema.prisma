@@ -303,6 +303,8 @@ model ShadowTrade {
   priceStatus           String    @default("NO_PRICE_SOURCE")
   priceSource           String?
   lastPriceUpdateAt     DateTime?
+  priceCheckedAt        DateTime?
+  priceCheckReason      String?
   createdAt             DateTime  @default(now())
   closedAt              DateTime?
   updatedAt             DateTime  @updatedAt

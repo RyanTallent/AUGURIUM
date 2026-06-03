@@ -28,7 +28,8 @@ Optional tuning:
 | `WORKER_INTERVAL_SHADOW_SYNC_MS` | `30000` | shadow:sync interval |
 | `SCORE_RESCORE_COOLDOWN_HOURS` | `24` | Min hours before rescore (active wallets) |
 | `SCORE_LOW_VALUE_RESCORE_HOURS` | `72` | Min hours before rescore (low trade count) |
-| `SHADOW_MAX_UPDATE` | `500` | Open shadow positions repriced per run |
+| `SHADOW_SYNC_BATCH_SIZE` | `500` | Shadow trades repriced per run (open + closed, stale first) |
+| `SHADOW_PRICE_STALE_MS` | `21600000` (6h) | Trade age after which price is STALE (real tape only) |
 
 After changing env vars, **redeploy the worker** (and web if dashboard Discord status should reflect new values).
 

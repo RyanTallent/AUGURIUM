@@ -10,66 +10,44 @@ import {
   resolveShadowPrice,
   runAllSimulations,
   updateExcursions,
-  type TapePoint,
 } from "@augurium/shadow";
 import {
-  buildMarketTapeForMarket,
-  latestMarketTrade,
-  latestMarketTradePrice,
-} from "../lib/market-tapes.js";
+  bestMarketLatestTrade,
+  loadShadowPriceSources,
+  priceCheckReasonForResult,
+} from "../lib/shadow-price-sources.js";
+import { selectShadowSyncBatch } from "../lib/shadow-sync-batch.js";
 
 const SHADOW_SIGNAL_TYPES = ["TRADE_NOW", "WATCHLIST", "RESEARCH"];
 const MAX_NEW_PER_RUN = Number(process.env.SHADOW_MAX_NEW ?? "150");
-const MAX_UPDATE_PER_RUN = Number(process.env.SHADOW_MAX_UPDATE ?? "500");
+const SHADOW_SYNC_BATCH_SIZE = Number(
+  process.env.SHADOW_SYNC_BATCH_SIZE ?? process.env.SHADOW_MAX_UPDATE ?? "500",
+);
 const SHADOW_STALE_AFTER_MS = Number(
   process.env.SHADOW_PRICE_STALE_MS ?? String(6 * 60 * 60 * 1000),
 );
 
 export interface ShadowPortfolioSummary {
+  processed: number;
+  fresh: number;
+  stale: number;
+  noSource: number;
+  noUpdate: number;
+  closed: number;
   created: number;
   updated: number;
-  closed: number;
   simulations: number;
   replays: number;
-  priceFresh: number;
-  priceStale: number;
-  priceNoUpdate: number;
-  priceNoSource: number;
 }
 
-function countPriceStatus(
+function tallyStatus(
   status: string,
-  counts: Pick<
-    ShadowPortfolioSummary,
-    "priceFresh" | "priceStale" | "priceNoUpdate" | "priceNoSource"
-  >,
+  counts: Pick<ShadowPortfolioSummary, "fresh" | "stale" | "noSource" | "noUpdate">,
 ): void {
-  if (status === "FRESH") counts.priceFresh++;
-  else if (status === "STALE") counts.priceStale++;
-  else if (status === "NO_PRICE_UPDATE") counts.priceNoUpdate++;
-  else if (status === "NO_PRICE_SOURCE") counts.priceNoSource++;
-}
-
-async function resolveTapeForMarket(
-  marketId: string,
-  conditionId: string | null,
-  outcomeSide: string,
-): Promise<{ tape: TapePoint[]; asset: string | null }> {
-  const trades = await prisma.trade.findMany({
-    where: { marketId },
-    orderBy: { tradedAt: "desc" },
-    take: 50,
-    select: { conditionId: true, asset: true, outcome: true, price: true, tradedAt: true },
-  });
-
-  if (!trades.length) return { tape: [], asset: null };
-
-  const normalized = outcomeSide.toUpperCase();
-  const match =
-    trades.find((t) => (t.outcome ?? "").toUpperCase() === normalized) ?? trades[0];
-  const cid = conditionId ?? match.conditionId;
-  const tape = await buildMarketTapeForMarket(marketId, cid, match.asset);
-  return { tape, asset: match.asset };
+  if (status === "FRESH") counts.fresh++;
+  else if (status === "STALE") counts.stale++;
+  else if (status === "NO_PRICE_SOURCE") counts.noSource++;
+  else if (status === "NO_PRICE_UPDATE") counts.noUpdate++;
 }
 
 export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
@@ -78,16 +56,17 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
   });
 
   const now = new Date();
-  let created = 0;
-  let updated = 0;
-  let closed = 0;
-  let simulations = 0;
-  let replays = 0;
-  const priceCounts = {
-    priceFresh: 0,
-    priceStale: 0,
-    priceNoUpdate: 0,
-    priceNoSource: 0,
+  const summary: ShadowPortfolioSummary = {
+    processed: 0,
+    fresh: 0,
+    stale: 0,
+    noSource: 0,
+    noUpdate: 0,
+    closed: 0,
+    created: 0,
+    updated: 0,
+    simulations: 0,
+    replays: 0,
   };
 
   try {
@@ -107,25 +86,26 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
       });
       if (existing) continue;
 
-      const { tape } = await resolveTapeForMarket(
-        signal.marketId,
-        signal.conditionId,
-        signal.side,
-      );
+      const sources = await loadShadowPriceSources({
+        marketId: signal.marketId,
+        conditionId: signal.conditionId,
+        outcomeSide: signal.side,
+      });
+      const bestTrade = bestMarketLatestTrade(sources);
       const entryMs = signal.createdAt.getTime() + DEFAULT_ENTRY_DELAY_MS;
       const entryResolved = resolveShadowPrice({
         entryMs: signal.createdAt.getTime(),
         entryPrice: 0,
         side: signal.side,
-        tape,
-        marketLatestTrade: await latestMarketTrade(signal.marketId),
+        tape: sources.tape,
+        marketLatestTrade: bestTrade,
         now,
         staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
       const entryPrice =
-        priceAtOrAfter(tape, entryMs) ??
+        priceAtOrAfter(sources.tape, entryMs) ??
         entryResolved.currentPrice ??
-        (tape.length ? tape[tape.length - 1].price : 0.5);
+        (sources.tape.length ? sources.tape[sources.tape.length - 1]!.price : 0.5);
 
       if (entryPrice <= 0) continue;
 
@@ -133,14 +113,20 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         entryMs,
         entryPrice,
         side: signal.side,
-        tape,
-        marketLatestTrade: await latestMarketTrade(signal.marketId),
-        marketSnapshotPrice: await latestMarketTradePrice(signal.marketId),
+        tape: sources.tape,
+        marketLatestTrade: bestTrade,
+        marketSnapshotPrice: sources.marketSnapshotPrice,
         lastKnownPrice: entryPrice,
         now,
         staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
-      countPriceStatus(postEntry.priceStatus, priceCounts);
+      tallyStatus(postEntry.priceStatus, summary);
+      const checkReason = priceCheckReasonForResult(
+        postEntry,
+        bestTrade?.reason ?? null,
+        SHADOW_STALE_AFTER_MS,
+        now,
+      );
 
       const metrics = computePositionMetrics(
         entryPrice,
@@ -173,6 +159,8 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
           priceStatus: postEntry.priceStatus,
           priceSource: postEntry.priceSource,
           lastPriceUpdateAt: postEntry.lastPriceUpdateAt,
+          priceCheckedAt: now,
+          priceCheckReason: checkReason,
         },
       });
 
@@ -239,13 +227,13 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
           payload: payload as object,
         },
       });
-      replays++;
+      summary.replays++;
 
       const sims = runAllSimulations({
         strategyName: "augurium_rules",
         entryDelayMs: DEFAULT_ENTRY_DELAY_MS,
         entryPrice,
-        priceSeries: tape,
+        priceSeries: sources.tape,
         signalCreatedAt: signal.createdAt,
         signalExpiresAt: signal.expiresAt,
         marketClosed: signal.market.closed || signal.market.resolved,
@@ -267,39 +255,62 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
             outcome: sim.outcome,
           },
         });
-        simulations++;
+        summary.simulations++;
       }
 
-      created++;
+      summary.created++;
     }
 
-    const openShadows = await prisma.shadowTrade.findMany({
-      where: { status: "OPEN" },
+    const allShadows = await prisma.shadowTrade.findMany({
       include: { signal: { include: { market: true } } },
-      orderBy: [{ lastPriceUpdateAt: "asc" }],
-      take: MAX_UPDATE_PER_RUN,
     });
+    const syncBatch = selectShadowSyncBatch(allShadows, SHADOW_SYNC_BATCH_SIZE);
 
-    for (const shadow of openShadows) {
-      const { tape } = await resolveTapeForMarket(
-        shadow.marketId,
-        shadow.conditionId,
-        shadow.side,
-      );
+    for (const shadow of syncBatch) {
+      summary.processed++;
+      const sources = await loadShadowPriceSources({
+        marketId: shadow.marketId,
+        conditionId: shadow.conditionId,
+        outcomeSide: shadow.side,
+      });
+      const bestTrade = bestMarketLatestTrade(sources);
       const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
-      const marketTrade = await latestMarketTrade(shadow.marketId);
       const priced = resolveShadowPrice({
         entryMs,
         entryPrice: shadow.simulatedEntryPrice,
         side: shadow.side,
-        tape,
-        marketLatestTrade: marketTrade,
-        marketSnapshotPrice: marketTrade?.price ?? null,
+        tape: sources.tape,
+        marketLatestTrade: bestTrade,
+        marketSnapshotPrice: sources.marketSnapshotPrice,
         lastKnownPrice: shadow.currentPrice,
         now,
         staleAfterMs: SHADOW_STALE_AFTER_MS,
       });
-      countPriceStatus(priced.priceStatus, priceCounts);
+      tallyStatus(priced.priceStatus, summary);
+      const checkReason = priceCheckReasonForResult(
+        priced,
+        bestTrade?.reason ?? null,
+        SHADOW_STALE_AFTER_MS,
+        now,
+      );
+
+      const baseUpdate = {
+        currentPrice: priced.currentPrice,
+        priceStatus: priced.priceStatus,
+        priceSource: priced.priceSource,
+        lastPriceUpdateAt: priced.lastPriceUpdateAt ?? shadow.lastPriceUpdateAt,
+        priceCheckedAt: now,
+        priceCheckReason: checkReason,
+      };
+
+      if (shadow.status !== "OPEN") {
+        await prisma.shadowTrade.update({
+          where: { id: shadow.id },
+          data: baseUpdate,
+        });
+        summary.updated++;
+        continue;
+      }
 
       let state = computePositionMetrics(
         shadow.simulatedEntryPrice,
@@ -333,68 +344,61 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         shadow.entryReasoning,
       );
 
-      const updateData = {
-        currentPrice: priced.currentPrice,
-        positionRemaining: nextState.positionRemaining,
-        unrealizedPnl: nextState.unrealizedPnl,
-        realizedPnl: nextState.realizedPnl,
-        roi: nextState.roi,
-        maxFavorableExcursion: nextState.maxFavorableExcursion,
-        maxAdverseExcursion: nextState.maxAdverseExcursion,
-        partialExitDone: nextState.partialExitDone,
-        runnerActive: nextState.runnerActive,
-        priceStatus: priced.priceStatus,
-        priceSource: priced.priceSource,
-        lastPriceUpdateAt: priced.lastPriceUpdateAt ?? shadow.lastPriceUpdateAt,
-        latestReasoning: decision?.latestReasoning ?? shadow.latestReasoning,
-        ...(decision
-          ? {
-              status: decision.status,
-              closedAt: now,
-              missedProfitAfterExit: decision.missedProfitAfterExit,
-              wouldHaveBeenBetterToHold: decision.wouldHaveBeenBetterToHold,
-            }
-          : {}),
-      };
-
       await prisma.shadowTrade.update({
         where: { id: shadow.id },
-        data: updateData,
+        data: {
+          ...baseUpdate,
+          positionRemaining: nextState.positionRemaining,
+          unrealizedPnl: nextState.unrealizedPnl,
+          realizedPnl: nextState.realizedPnl,
+          roi: nextState.roi,
+          maxFavorableExcursion: nextState.maxFavorableExcursion,
+          maxAdverseExcursion: nextState.maxAdverseExcursion,
+          partialExitDone: nextState.partialExitDone,
+          runnerActive: nextState.runnerActive,
+          latestReasoning: decision?.latestReasoning ?? shadow.latestReasoning,
+          ...(decision
+            ? {
+                status: decision.status,
+                closedAt: now,
+                missedProfitAfterExit: decision.missedProfitAfterExit,
+                wouldHaveBeenBetterToHold: decision.wouldHaveBeenBetterToHold,
+              }
+            : {}),
+        },
       });
 
-      if (decision) closed++;
-      else updated++;
+      if (decision) summary.closed++;
+      else summary.updated++;
     }
 
     await prisma.ingestionRun.update({
       where: { id: run.id },
       data: {
         status: "success",
-        itemCount: created + updated,
+        itemCount: summary.processed,
         finishedAt: new Date(),
         metadata: {
-          created,
-          updated,
-          closed,
-          simulations,
-          replays,
-          ...priceCounts,
+          processed: summary.processed,
+          fresh: summary.fresh,
+          stale: summary.stale,
+          noSource: summary.noSource,
+          noUpdate: summary.noUpdate,
+          closed: summary.closed,
+          created: summary.created,
+          updated: summary.updated,
+          simulations: summary.simulations,
+          replays: summary.replays,
+          batchSize: SHADOW_SYNC_BATCH_SIZE,
         },
       },
     });
 
     console.log(
-      `[shadow:sync] created=${created} updated=${updated} closed=${closed} fresh=${priceCounts.priceFresh} stale=${priceCounts.priceStale} noUpdate=${priceCounts.priceNoUpdate} noSource=${priceCounts.priceNoSource}`,
+      `[shadow:sync] processed=${summary.processed} fresh=${summary.fresh} stale=${summary.stale} noSource=${summary.noSource} noUpdate=${summary.noUpdate} closed=${summary.closed} created=${summary.created}`,
     );
 
-    return {
-      created,
-      updated,
-      closed,
-      simulations,
-      replays,
-      ...priceCounts,
-    };
+    return summary;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await prisma.ingestionRun.update({
