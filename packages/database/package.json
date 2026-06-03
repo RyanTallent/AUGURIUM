@@ -2,9 +2,19 @@
   "name": "@augurium/database",
   "version": "0.1.0",
   "private": true,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
   "scripts": {
+    "build": "tsc",
     "generate": "prisma generate",
     "push": "prisma db push",
     "studio": "prisma studio",
@@ -14,6 +24,7 @@
     "@prisma/client": "^6.9.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.21",
     "prisma": "^6.9.0",
     "typescript": "^5.8.3"
   }
