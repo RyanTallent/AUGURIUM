@@ -11,6 +11,8 @@
     "dev": "npm run dev --workspace=@augurium/web",
     "dev:worker": "npm run dev --workspace=@augurium/worker",
     "build": "npm run build --workspaces --if-present",
+    "build:shared": "npm run build --workspace=@augurium/shared",
+    "build:web": "npm run build --workspace=@augurium/shared && npm run db:generate && npm run build --workspace=@augurium/web",
     "db:generate": "npm run generate --workspace=@augurium/database",
     "db:push": "npm run push --workspace=@augurium/database",
     "db:studio": "npm run studio --workspace=@augurium/database",

@@ -68,6 +68,7 @@ services:
     buildCommand: >-
       npm ci &&
       npm run db:generate &&
+      npm run build --workspace=@augurium/shared &&
       npm run build --workspace=@augurium/web
     preDeployCommand: npm run db:push
     startCommand: npm run start --workspace=@augurium/web
