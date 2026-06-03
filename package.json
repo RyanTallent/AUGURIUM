@@ -54,6 +54,7 @@
     "cleanup:duplicate-shadows": "node scripts/cleanup-duplicate-shadows.mjs",
     "report:readiness": "npm run build:database && node scripts/generate-readiness-report.mjs",
     "maintenance:production": "npm run build:database && node scripts/maintenance-production.mjs",
+    "recovery:production": "npm run build:database && node scripts/recovery-production.mjs",
     "backfill:shadow-signal-type": "node scripts/backfill-shadow-signal-type.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"

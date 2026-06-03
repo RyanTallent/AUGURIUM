@@ -69,6 +69,24 @@ Create a **one-off** job on the **worker** service (same env group as production
 
 The worker also runs `maintenance:daily` on a **24h** interval (`WORKER_INTERVAL_MAINTENANCE_DAILY_MS` to override).
 
+### Full recovery sprint
+
+```bash
+npm run recovery:production -- --dry-run
+npm run recovery:production
+```
+
+Writes `PRODUCTION_RECOVERY_REPORT.md` with before/after metrics and blocker forensics.
+
+**Paper execution** (after recovery gates pass): set `EXECUTION_ENABLED=true` and `EXECUTION_PROVIDER=paper` on the **worker** only. Keep `LIVE_TRADING_ENABLED=false` and `ALLOW_REAL_MONEY=false`. Worker queues `portfolio:run` and `execution:run` must be active.
+
+**Admin maintenance API** (web service): set `MAINTENANCE_ADMIN_TOKEN`, then:
+
+- `POST /api/admin/maintenance/dry-run`
+- `POST /api/admin/maintenance/run`
+
+Header: `Authorization: Bearer <token>` or `X-Maintenance-Admin-Token`.
+
 Worker periodic jobs (Render `augurium-worker`): the worker loop runs these on an interval (not only once at boot):
 
 | Job | Redis queue | Default interval |

@@ -85,9 +85,27 @@ export default async function MaintenancePage() {
         {`npm run maintenance:production -- --dry-run\nnpm run maintenance:production`}
       </pre>
       <p style={{ fontSize: "0.85rem" }}>
-        Report: <code>PRODUCTION_MAINTENANCE_REPORT.md</code> · Worker schedules{" "}
-        <code>maintenance:daily</code> every 24h
+        Reports: <code>PRODUCTION_MAINTENANCE_REPORT.md</code>,{" "}
+        <code>PRODUCTION_RECOVERY_REPORT.md</code> · Worker: <code>maintenance:daily</code>{" "}
+        every 24h
       </p>
+
+      <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Admin API (token required)</h2>
+      <p style={{ fontSize: "0.9rem" }}>
+        Set <code>MAINTENANCE_ADMIN_TOKEN</code> on web. One run at a time. Does not enable live
+        trading.
+      </p>
+      <pre
+        style={{
+          background: "var(--surface)",
+          padding: "1rem",
+          borderRadius: "6px",
+          fontSize: "0.8rem",
+          overflow: "auto",
+        }}
+      >
+        {`curl -X POST $AUGURIUM_DASHBOARD_URL/api/admin/maintenance/dry-run \\\n  -H "Authorization: Bearer $MAINTENANCE_ADMIN_TOKEN"\n\ncurl -X POST $AUGURIUM_DASHBOARD_URL/api/admin/maintenance/run \\\n  -H "Authorization: Bearer $MAINTENANCE_ADMIN_TOKEN"`}
+      </pre>
 
       {lastRun && lastRun.steps.length > 0 && (
         <>

@@ -90,3 +90,28 @@ export {
   cleanupDuplicateShadows,
   reconcileShadowPayouts,
 } from "./maintenance-repairs.js";
+export {
+  computeIngestionHealthSummary,
+  type IngestionHealthSummary,
+} from "./ingestion-health-summary.js";
+export {
+  computeShadowTrustReport,
+  type ShadowTrustReport,
+} from "./shadow-trust-report.js";
+export {
+  computePortfolioRejectionSummary,
+  type PortfolioRejectionSummary,
+} from "./portfolio-rejection-summary.js";
+export {
+  computeReadinessForensics,
+  type ReadinessForensicsReport,
+  type ReadinessForensicsItem,
+} from "./readiness-forensics.js";
+export {
+  computePaperStartEligibility,
+  type PaperStartEligibility,
+} from "./paper-start-eligibility.js";
+export {
+  runProductionRecovery,
+  type ProductionRecoveryResult,
+} from "./production-recovery.js";
