@@ -47,6 +47,8 @@ export const QUEUES = {
   PORTFOLIO_RUN: "portfolio:run",
   /** Phase G — execution engine (gated; paper by default) */
   EXECUTION_RUN: "execution:run",
+  /** Production self-healing (daily) */
+  MAINTENANCE_DAILY: "maintenance:daily",
   /** @deprecated use DISCORD_ENQUEUE + DISCORD_DISPATCH */
   DISCORD_NOTIFY: "discord:notify",
 } as const;
@@ -82,6 +84,8 @@ export const PORTFOLIO_QUEUES = [QUEUES.PORTFOLIO_RUN] as const;
 /** Phase G — execution */
 export const EXECUTION_QUEUES = [QUEUES.EXECUTION_RUN] as const;
 
+export const MAINTENANCE_QUEUES = [QUEUES.MAINTENANCE_DAILY] as const;
+
 /** Phase A + B + C + D + E + F + G worker tick queues */
 export const WORKER_QUEUES = [
   ...INGESTION_QUEUES,
@@ -91,6 +95,7 @@ export const WORKER_QUEUES = [
   ...DISCORD_QUEUES,
   ...PORTFOLIO_QUEUES,
   ...EXECUTION_QUEUES,
+  ...MAINTENANCE_QUEUES,
 ] as const;
 
 export type TraderTierLabel =

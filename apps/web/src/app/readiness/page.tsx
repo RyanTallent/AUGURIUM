@@ -88,13 +88,22 @@ export default async function ReadinessPage() {
               ))}
           </ul>
 
-          {report.blockers.length > 0 && (
+          {report.blockerDetails.length > 0 && (
             <>
               <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Blockers</h2>
-              <ul>
-                {report.blockers.map((b) => (
-                  <li key={b} className={styles.warn}>
-                    {b}
+              <ul style={{ fontSize: "0.9rem" }}>
+                {report.blockerDetails.map((b) => (
+                  <li key={b.id} style={{ marginBottom: "0.75rem" }} className={styles.warn}>
+                    <strong>{b.message}</strong>
+                    <br />
+                    {b.whyItMatters}
+                    {b.repairCommand && (
+                      <>
+                        <br />
+                        Action: <code>{b.repairCommand}</code>
+                        {b.blocksLiveTrading ? " · blocks live trading" : ""}
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>

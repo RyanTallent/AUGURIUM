@@ -9,6 +9,10 @@ import { auditShadowFreshness } from "./shadow-freshness-audit.js";
 import { computeShadowPayoutAudit, countImpossiblePnl } from "./shadow-payout-audit.js";
 import { prisma } from "./client.js";
 import type { ReadinessGrade } from "./portfolio-validation.js";
+import {
+  buildReadinessBlockerDetails,
+  type ReadinessBlockerDetail,
+} from "./readiness-blockers.js";
 
 export interface ReadinessSection {
   name: string;
@@ -23,6 +27,7 @@ export interface LiveTradingReadinessReport {
   liveTradingAllowed: boolean;
   liveTradingReady: boolean;
   blockers: string[];
+  blockerDetails: ReadinessBlockerDetail[];
   warnings: string[];
   sections: ReadinessSection[];
   shadowAnalyticsTrustworthy: boolean;
@@ -205,6 +210,7 @@ export async function computeLiveTradingReadiness(): Promise<LiveTradingReadines
     liveTradingAllowed: liveTradingReady,
     liveTradingReady,
     blockers,
+    blockerDetails: buildReadinessBlockerDetails(blockers),
     warnings,
     sections,
     shadowAnalyticsTrustworthy: shadow.analyticsTrustworthy,

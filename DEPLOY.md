@@ -38,12 +38,36 @@ After changing env vars, **redeploy the worker** (and web if dashboard Discord s
 ## Post-deploy maintenance
 
 ```bash
-npm run db:push          # apply schema (includes new category/shadow fields)
-npm run backfill:categories
-npm run verify:production-health
+npm run db:push          # apply schema
+npm run db:generate
+npm run maintenance:production -- --dry-run   # diagnose only (no writes)
+npm run maintenance:production              # repair + verify + report
 ```
 
-Production health JSON: `GET /api/health/production` on the web service (or `npm run verify:production-health`).
+Report written to `PRODUCTION_MAINTENANCE_REPORT.md` at repo root.
+
+Production health JSON:
+
+- `GET /api/health/production` — wallets, scoring, shadow freshness
+- `GET /api/health/worker` — last maintenance run, worker memory snapshot
+
+Dashboard: `/maintenance` (CLI instructions; no unsafe web-triggered repairs).
+
+### Render one-off jobs
+
+Create a **one-off** job on the **worker** service (same env group as production), then run:
+
+| Task | Command | Notes |
+|------|---------|--------|
+| Maintenance dry-run | `npm run maintenance:production -- --dry-run` | No DB mutations; still runs verify scripts |
+| Maintenance live | `npm run maintenance:production` | Backfill categories, dedupe shadows, reconcile payouts |
+| Reconcile payouts only | `npm run reconcile:shadow-payouts` | Add `-- --dry-run` to preview |
+| Category backfill | `npm run backfill:categories` | Safe to repeat |
+| Duplicate shadow cleanup | `npm run cleanup:duplicate-shadows` | Add `-- --dry-run` to preview |
+
+**Safety:** Do not set `LIVE_TRADING_ENABLED`, `ALLOW_REAL_MONEY`, or lower TRADE_NOW thresholds. Maintenance never enables execution or fabricates prices.
+
+The worker also runs `maintenance:daily` on a **24h** interval (`WORKER_INTERVAL_MAINTENANCE_DAILY_MS` to override).
 
 Worker periodic jobs (Render `augurium-worker`): the worker loop runs these on an interval (not only once at boot):
 
@@ -55,8 +79,11 @@ Worker periodic jobs (Render `augurium-worker`): the worker loop runs these on a
 | portfolio:run | `portfolio:run` | 300s |
 | discord:enqueue | `discord:enqueue` | 300s |
 | discord:dispatch | `discord:dispatch` | 60s |
+| maintenance:daily | `maintenance:daily` | 24h (self-healing) |
 
-Override per queue: `WORKER_INTERVAL_TRADER_SCORE_MS`, `WORKER_INTERVAL_SHADOW_SYNC_MS`, etc. Disable periodic runs: `WORKER_PERIODIC_JOBS_ENABLED=false` (redis `LPUSH` triggers only).
+Override per queue: `WORKER_INTERVAL_TRADER_SCORE_MS`, `WORKER_INTERVAL_SHADOW_SYNC_MS`, `WORKER_INTERVAL_MAINTENANCE_DAILY_MS`, etc. Disable periodic runs: `WORKER_PERIODIC_JOBS_ENABLED=false` (redis `LPUSH` triggers only).
+
+Worker memory: set `WORKER_HEAP_HIGH_MB` (default `1400`) to skip noncritical jobs when heap is high. Memory is logged after each job and stored on maintenance runs.
 
 ## Safety
 

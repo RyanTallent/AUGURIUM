@@ -13,6 +13,7 @@ import { runDiscordEnqueueJob } from "../jobs/discord-enqueue.js";
 import { runDiscordDispatchJob } from "../jobs/discord-dispatch.js";
 import { runPortfolioEngineJob } from "../jobs/run-portfolio-engine.js";
 import { runExecutionEngineJob } from "../jobs/run-execution-engine.js";
+import { runMaintenanceDailyJob } from "../jobs/run-maintenance-daily.js";
 import { processDiscordNotifications } from "../engines/discord.js";
 
 export type JobCounts = Record<string, string | number | boolean>;
@@ -104,6 +105,14 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         placed: s.placed,
         blocked: s.blocked,
         eligible: s.eligible,
+      };
+    }
+    case QUEUES.MAINTENANCE_DAILY: {
+      const s = await runMaintenanceDailyJob();
+      return {
+        status: String(s.status ?? "unknown"),
+        categoriesUpdated: Number(s.categoriesUpdated ?? 0),
+        liveTradingReady: Boolean(s.liveTradingReady),
       };
     }
     default:

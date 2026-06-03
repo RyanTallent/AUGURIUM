@@ -10,6 +10,10 @@ import {
 } from "./lib/queue-scheduler.js";
 import { runQueueJob } from "./lib/run-queue-job.js";
 import { markOrphanedShadowPortfolioRuns } from "./lib/ingestion-run-lifecycle.js";
+import {
+  logJobMemory,
+  shouldSkipQueueForMemory,
+} from "./lib/worker-memory.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
@@ -40,15 +44,22 @@ async function hasRedisTrigger(queue: string): Promise<boolean> {
 
 async function executeQueue(queue: string, reason: "interval" | "redis"): Promise<void> {
   const job = jobNameForQueue(queue);
+  if (shouldSkipQueueForMemory(queue)) {
+    console.warn(`[worker] skipping noncritical job=${job} queue=${queue} (heap high)`);
+    lastRunAtMs.set(queue, Date.now());
+    return;
+  }
   const started = Date.now();
   console.log(`[worker] job start job=${job} queue=${queue} reason=${reason}`);
   try {
     const counts = await runQueueJob(queue);
+    logJobMemory(job, queue);
     console.log(
       `[worker] job done job=${job} queue=${queue} reason=${reason} durationMs=${Date.now() - started}`,
       counts,
     );
   } catch (err) {
+    logJobMemory(job, queue);
     console.error(
       `[worker] job failed job=${job} queue=${queue} reason=${reason} durationMs=${Date.now() - started}`,
       err,

@@ -65,3 +65,28 @@ export {
   computeLiveTradingReadiness,
   type LiveTradingReadinessReport,
 } from "./readiness-report.js";
+export {
+  buildReadinessBlockerDetails,
+  enrichReadinessReport,
+  type ReadinessBlockerDetail,
+} from "./readiness-blockers.js";
+export {
+  collectMaintenanceMetrics,
+  type MaintenanceMetricsSnapshot,
+} from "./maintenance-metrics.js";
+export {
+  getLastMaintenanceRun,
+  getLastWorkerMemoryFromRuns,
+  MAINTENANCE_SOURCE_DAILY,
+  MAINTENANCE_SOURCE_PRODUCTION,
+  type MaintenanceRunSummary,
+} from "./maintenance-status.js";
+export {
+  runProductionMaintenance,
+  runDailyMaintenance,
+  type ProductionMaintenanceResult,
+} from "./production-maintenance.js";
+export {
+  cleanupDuplicateShadows,
+  reconcileShadowPayouts,
+} from "./maintenance-repairs.js";

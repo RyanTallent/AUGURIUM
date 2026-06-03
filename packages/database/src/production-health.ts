@@ -4,6 +4,7 @@ import {
   isShadowSyncRunAcceptable,
   parseShadowSyncRunOutcome,
 } from "./shadow-sync-health.js";
+import { getLastWorkerMemoryFromRuns } from "./maintenance-status.js";
 
 export interface ShadowSyncRunStats {
   selected: number | null;
@@ -41,6 +42,9 @@ export interface ProductionHealthReport {
   latestShadowSyncUpdated: number | null;
   shadowSyncPartialTimeout: boolean;
   shadowSyncRunAcceptable: boolean;
+  ingestionFailedRuns24h: number;
+  workerMemoryHeapUsedMb: number | null;
+  workerMemoryHigh: boolean;
   generatedAt: string;
 }
 
@@ -97,6 +101,7 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
   } as const;
 
   const orphanCutoff = new Date(Date.now() - SHADOW_ORPHAN_MS);
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   const [
     walletsTotal,
@@ -109,6 +114,8 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
     latestShadowSyncCompleted,
     latestShadowSyncRunning,
     shadowSyncOrphanedRunningCount,
+    ingestionFailedRuns24h,
+    workerMem,
   ] = await Promise.all([
     prisma.trader.count(),
     prisma.trader.count({ where: { lastScoredAt: { not: null } } }),
@@ -144,6 +151,10 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
         startedAt: { lt: orphanCutoff },
       },
     }),
+    prisma.ingestionRun.count({
+      where: { status: "failed", startedAt: { gte: since24h } },
+    }),
+    getLastWorkerMemoryFromRuns(),
   ]);
 
   const shadowPriceStatusCounts = Object.fromEntries(
@@ -195,6 +206,9 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
       latestStats?.updated ?? completedStats?.updated ?? null,
     shadowSyncPartialTimeout,
     shadowSyncRunAcceptable,
+    ingestionFailedRuns24h,
+    workerMemoryHeapUsedMb: workerMem?.heapUsedMb ?? null,
+    workerMemoryHigh: workerMem?.highWatermark ?? false,
     generatedAt: new Date().toISOString(),
   };
 }

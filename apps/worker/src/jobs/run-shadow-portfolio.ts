@@ -23,6 +23,7 @@ import {
   writeShadowSyncProgress,
 } from "../lib/ingestion-run-lifecycle.js";
 import { runShadowPriceSync, type ShadowPriceSyncStats } from "./shadow-price-sync.js";
+import { flushThrottledLogs, noteThrottledLog } from "../lib/log-throttle.js";
 
 const SHADOW_SIGNAL_TYPES = ["TRADE_NOW", "WATCHLIST", "RESEARCH"];
 const MAX_NEW_PER_RUN = Number(process.env.SHADOW_MAX_NEW ?? "150");
@@ -174,9 +175,7 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         (sources.tape.length ? sources.tape[sources.tape.length - 1]!.price : 0.5);
 
       if (entryPrice <= 0 || !isPlausibleEntryPrice(entryPrice)) {
-        console.warn(
-          `[shadow:open] skip signal=${signal.id} implausible entry=${entryPrice}`,
-        );
+        noteThrottledLog("shadow:open:implausible_entry");
         continue;
       }
 
@@ -335,6 +334,8 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
 
       summary.created++;
     }
+
+    flushThrottledLogs("shadow:open");
 
     await finalizeShadowPortfolioRun(run.id, {
       status: "success",

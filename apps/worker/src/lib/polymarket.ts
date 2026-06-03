@@ -1,3 +1,11 @@
+import {
+  isPaginationOffsetExhausted,
+  parseOffsetFromUrl,
+  PolymarketPaginationExhaustedError,
+} from "./polymarket-pagination.js";
+
+export { PolymarketPaginationExhaustedError, isPaginationOffsetExhausted };
+
 const GAMMA_API = process.env.POLYMARKET_GAMMA_BASE ?? "https://gamma-api.polymarket.com";
 const DATA_API = process.env.POLYMARKET_DATA_BASE ?? "https://data-api.polymarket.com";
 
@@ -79,11 +87,18 @@ export interface HoldersResponse {
   holders: HolderEntry[];
 }
 
-export async function fetchJson<T>(url: string): Promise<T> {
+export async function fetchJson<T>(
+  url: string,
+  opts?: { offset?: number },
+): Promise<T> {
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) {
+    const offset = opts?.offset ?? parseOffsetFromUrl(url);
+    if (isPaginationOffsetExhausted(res.status, offset)) {
+      throw new PolymarketPaginationExhaustedError(res.status, url, offset);
+    }
     throw new Error(`Polymarket HTTP ${res.status} for ${url}`);
   }
   return (await res.json()) as T;

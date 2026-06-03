@@ -8,6 +8,10 @@ import {
   type DataApiTrade,
 } from "../lib/polymarket.js";
 import {
+  handlePaginationExhausted,
+  isPaginationExhaustedError,
+} from "../lib/ingest-pagination.js";
+import {
   hintsFromDataTrade,
   resolveOrCreateMarket,
 } from "../lib/market-linking.js";
@@ -40,7 +44,16 @@ export async function ingestGlobalTrades(): Promise<number> {
 
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = dataTradesUrl(PAGE_SIZE, offset);
-      const trades = await fetchJson<DataApiTrade[]>(url);
+      let trades: DataApiTrade[];
+      try {
+        trades = await fetchJson<DataApiTrade[]>(url, { offset });
+      } catch (err) {
+        if (isPaginationExhaustedError(err)) {
+          await handlePaginationExhausted(stream, err);
+          break;
+        }
+        throw err;
+      }
       const rawId = await storeRawPayload("polymarket-data-api", url, trades);
 
       if (trades.length === 0) {
@@ -151,6 +164,20 @@ export async function ingestGlobalTrades(): Promise<number> {
     console.log(`[ingest-trades] ingested ${totalIngested} new trades`);
     return totalIngested;
   } catch (err) {
+    if (isPaginationExhaustedError(err)) {
+      await handlePaginationExhausted(stream, err);
+      await prisma.ingestionRun.update({
+        where: { id: run.id },
+        data: {
+          status: "success",
+          itemCount: totalIngested,
+          finishedAt: new Date(),
+          metadata: { paginationExhausted: true, offset: err.offset },
+        },
+      });
+      console.log(`[ingest-trades] pagination exhausted at offset ${err.offset}; ingested ${totalIngested}`);
+      return totalIngested;
+    }
     const message = err instanceof Error ? err.message : "unknown error";
     await failCursor(stream, message);
     await prisma.ingestionRun.update({

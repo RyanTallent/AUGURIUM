@@ -8,6 +8,10 @@ import {
   type DataApiActivity,
 } from "../lib/polymarket.js";
 import {
+  handlePaginationExhausted,
+  isPaginationExhaustedError,
+} from "../lib/ingest-pagination.js";
+import {
   hintsFromDataTrade,
   resolveOrCreateMarket,
 } from "../lib/market-linking.js";
@@ -48,7 +52,16 @@ export async function ingestWalletActivity(): Promise<number> {
       try {
         for (let page = 0; page < MAX_PAGES_PER_WALLET; page++) {
           const url = dataActivityUrl(trader.address, PAGE_SIZE, offset);
-          const activities = await fetchJson<DataApiActivity[]>(url);
+          let activities: DataApiActivity[];
+          try {
+            activities = await fetchJson<DataApiActivity[]>(url, { offset });
+          } catch (err) {
+            if (isPaginationExhaustedError(err)) {
+              await handlePaginationExhausted(stream, err);
+              break;
+            }
+            throw err;
+          }
           const rawId = await storeRawPayload("polymarket-data-api", url, activities);
 
           if (activities.length === 0) {

@@ -34,6 +34,8 @@ export default function RootLayout({
           <a href="/shadow/payout-audit">Payout audit</a>
           <a href="/signals/validation">Signal validation</a>
           <a href="/readiness">Readiness</a>
+          <a href="/maintenance">Maintenance</a>
+          <a href="/health">Health</a>
           <a href="/simulations">Simulations</a>
           <a href="/replay">Replay</a>
           <a href="/portfolio">Portfolio</a>

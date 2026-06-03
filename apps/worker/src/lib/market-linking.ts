@@ -140,19 +140,36 @@ export async function upsertMarketFromGamma(
     });
     return row.id;
   } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "P2002") {
-      const fallback = await prisma.market.findFirst({
-        where: {
-          OR: [
-            { externalId: market.id },
-            ...(market.conditionId ? [{ conditionId: market.conditionId }] : []),
-          ],
-        },
-      });
-      if (fallback) return fallback.id;
-    }
+    const recovered = await recoverMarketFromP2002(market, err);
+    if (recovered) return recovered;
     throw err;
   }
+}
+
+function isPrismaP2002(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "P2002");
+}
+
+async function recoverMarketFromP2002(
+  market: GammaMarketRecord,
+  err: unknown,
+): Promise<string | null> {
+  if (!isPrismaP2002(err)) return null;
+  const fallback = await prisma.market.findFirst({
+    where: {
+      OR: [
+        { externalId: market.id },
+        ...(market.conditionId ? [{ conditionId: market.conditionId }] : []),
+      ],
+    },
+  });
+  if (fallback) {
+    console.log(
+      `[market-linking] P2002 recovered externalId=${market.id} conditionId=${market.conditionId ?? "n/a"} → ${fallback.id}`,
+    );
+    return fallback.id;
+  }
+  return null;
 }
 
 export async function fetchGammaMarketByConditionId(
@@ -360,18 +377,35 @@ export async function ensureMarketForPosition(
   const resolved = await resolveOrCreateMarket(hintsFromPosition(pos));
   if (resolved) return resolved;
 
-  const created = await prisma.market.create({
-    data: {
-      externalId: pos.conditionId,
-      conditionId: pos.conditionId,
-      eventExternalId: pos.eventId,
-      eventSlug: pos.eventSlug,
-      title: pos.title ?? `Market ${pos.conditionId.slice(0, 12)}…`,
-      slug: pos.slug,
-      source: "polymarket",
-      active: true,
-      clobTokenIds: pos.asset ? [pos.asset] : [],
-    },
-  });
-  return { marketId: created.id, method: "position-payload" };
+  try {
+    const created = await prisma.market.create({
+      data: {
+        externalId: pos.conditionId,
+        conditionId: pos.conditionId,
+        eventExternalId: pos.eventId,
+        eventSlug: pos.eventSlug,
+        title: pos.title ?? `Market ${pos.conditionId.slice(0, 12)}…`,
+        slug: pos.slug,
+        source: "polymarket",
+        active: true,
+        clobTokenIds: pos.asset ? [pos.asset] : [],
+      },
+    });
+    return { marketId: created.id, method: "position-payload" };
+  } catch (err) {
+    if (isPrismaP2002(err)) {
+      const existing = await prisma.market.findFirst({
+        where: {
+          OR: [{ conditionId: pos.conditionId }, { externalId: pos.conditionId }],
+        },
+      });
+      if (existing) {
+        console.log(
+          `[market-linking] P2002 recovered position market conditionId=${pos.conditionId} → ${existing.id}`,
+        );
+        return { marketId: existing.id, method: "position-payload" };
+      }
+    }
+    throw err;
+  }
 }

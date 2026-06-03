@@ -8,6 +8,10 @@ import {
   type GammaMarket,
   type GammaMarketRecord,
 } from "../lib/polymarket.js";
+import {
+  handlePaginationExhausted,
+  isPaginationExhaustedError,
+} from "../lib/ingest-pagination.js";
 import { upsertMarketFromGamma } from "../lib/market-linking.js";
 import {
   advanceCursor,
@@ -38,29 +42,46 @@ async function ingestMarketsPages(
   let offset = Number.parseInt(cursor.cursorValue, 10) || 0;
   let count = 0;
 
-  for (let page = 0; page < maxPages; page++) {
-    const url = buildUrl(PAGE_SIZE, offset);
-    const markets = await fetchJson<GammaMarketRecord[]>(url);
-    await storeRawPayload("polymarket-gamma", url, markets);
+  try {
+    for (let page = 0; page < maxPages; page++) {
+      const url = buildUrl(PAGE_SIZE, offset);
+      let markets: GammaMarketRecord[];
+      try {
+        markets = await fetchJson<GammaMarketRecord[]>(url, { offset });
+      } catch (err) {
+        if (isPaginationExhaustedError(err)) {
+          await handlePaginationExhausted(stream, err);
+          break;
+        }
+        throw err;
+      }
+      await storeRawPayload("polymarket-gamma", url, markets);
 
-    if (markets.length === 0) {
-      await advanceCursor(stream, "0", { resetReason: "end-of-feed" });
-      break;
+      if (markets.length === 0) {
+        await advanceCursor(stream, "0", { resetReason: "end-of-feed" });
+        break;
+      }
+
+      for (const market of markets) {
+        if (!market.conditionId) continue;
+        await upsertMarketFromGamma(market);
+        count++;
+      }
+
+      offset += PAGE_SIZE;
+      await advanceCursor(stream, String(offset), { lastPageSize: markets.length });
+
+      if (markets.length < PAGE_SIZE) {
+        await advanceCursor(stream, "0", { resetReason: "partial-page" });
+        break;
+      }
     }
-
-    for (const market of markets) {
-      if (!market.conditionId) continue;
-      await upsertMarketFromGamma(market);
-      count++;
+  } catch (err) {
+    if (isPaginationExhaustedError(err)) {
+      await handlePaginationExhausted(stream, err);
+      return count;
     }
-
-    offset += PAGE_SIZE;
-    await advanceCursor(stream, String(offset), { lastPageSize: markets.length });
-
-    if (markets.length < PAGE_SIZE) {
-      await advanceCursor(stream, "0", { resetReason: "partial-page" });
-      break;
-    }
+    throw err;
   }
 
   return count;
@@ -90,9 +111,19 @@ async function ingestEventPages(): Promise<number> {
   let offset = Number.parseInt(cursor.cursorValue, 10) || 0;
   let count = 0;
 
+  try {
   for (let page = 0; page < MAX_PAGES_EVENTS; page++) {
     const url = gammaEventsUrl(PAGE_SIZE, offset, true);
-    const events = await fetchJson<GammaEvent[]>(url);
+    let events: GammaEvent[];
+    try {
+      events = await fetchJson<GammaEvent[]>(url, { offset });
+    } catch (err) {
+      if (isPaginationExhaustedError(err)) {
+        await handlePaginationExhausted(STREAM_EVENTS, err);
+        break;
+      }
+      throw err;
+    }
     await storeRawPayload("polymarket-gamma", url, events);
 
     if (events.length === 0) {
@@ -119,6 +150,13 @@ async function ingestEventPages(): Promise<number> {
       await advanceCursor(STREAM_EVENTS, "0", { resetReason: "partial-page" });
       break;
     }
+  }
+  } catch (err) {
+    if (isPaginationExhaustedError(err)) {
+      await handlePaginationExhausted(STREAM_EVENTS, err);
+      return count;
+    }
+    throw err;
   }
 
   return count;
