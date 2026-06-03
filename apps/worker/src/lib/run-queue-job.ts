@@ -63,12 +63,12 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
     case QUEUES.SHADOW_SYNC: {
       const s = await runShadowPortfolioJob();
       return {
-        processed: s.processed,
-        fresh: s.fresh,
-        stale: s.stale,
-        noSource: s.noSource,
-        noUpdate: s.noUpdate,
-        closed: s.closed,
+        selectedCount: s.selectedCount,
+        processedCount: s.processedCount,
+        updatedCount: s.updatedCount,
+        freshCount: s.freshCount,
+        staleCount: s.staleCount,
+        shadowTotal: s.shadowTotal,
         created: s.created,
       };
     }

@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { compareShadowSyncPriority, selectShadowSyncBatch } from "./shadow-sync-batch.js";
+import {
+  compareShadowSyncPriority,
+  resolveShadowSyncBatchSize,
+  selectShadowSyncBatch,
+} from "./shadow-sync-batch.js";
 
 describe("shadow sync batch selection", () => {
   it("prioritizes open stale before open fresh", () => {
@@ -44,6 +48,20 @@ describe("shadow sync batch selection", () => {
           priceCheckedAt: null,
         },
       ) < 0,
+    );
+  });
+
+  it("returns 500 when SHADOW_MAX_UPDATE=1 but SHADOW_SYNC_BATCH_SIZE unset", () => {
+    assert.equal(
+      resolveShadowSyncBatchSize({ SHADOW_MAX_UPDATE: "1" }),
+      500,
+    );
+  });
+
+  it("honors SHADOW_SYNC_BATCH_SIZE", () => {
+    assert.equal(
+      resolveShadowSyncBatchSize({ SHADOW_SYNC_BATCH_SIZE: "250" }),
+      250,
     );
   });
 });

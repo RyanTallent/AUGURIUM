@@ -6,6 +6,9 @@ export interface ShadowSyncCandidate {
   priceCheckedAt: Date | null;
 }
 
+const DEFAULT_BATCH_SIZE = 500;
+const MAX_BATCH_SIZE = 2000;
+
 function statusRank(status: string): number {
   return status === "OPEN" ? 0 : 1;
 }
@@ -38,6 +41,29 @@ export function selectShadowSyncBatch<T extends ShadowSyncCandidate>(
   all: T[],
   batchSize: number,
 ): T[] {
-  if (all.length <= batchSize) return [...all].sort(compareShadowSyncPriority);
-  return [...all].sort(compareShadowSyncPriority).slice(0, batchSize);
+  const limit = Math.max(1, Math.floor(batchSize));
+  if (all.length <= limit) return [...all].sort(compareShadowSyncPriority);
+  return [...all].sort(compareShadowSyncPriority).slice(0, limit);
+}
+
+/**
+ * Batch size for fleet repricing. Uses SHADOW_SYNC_BATCH_SIZE only.
+ * SHADOW_MAX_UPDATE is deprecated (was capped at 1 in production and limited the fleet).
+ */
+export function resolveShadowSyncBatchSize(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.SHADOW_SYNC_BATCH_SIZE;
+  if (raw != null && raw !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 1) {
+      return Math.min(Math.floor(n), MAX_BATCH_SIZE);
+    }
+  }
+  if (env.SHADOW_MAX_UPDATE != null && env.SHADOW_MAX_UPDATE !== "") {
+    console.warn(
+      "[shadow:sync] ignoring deprecated SHADOW_MAX_UPDATE; set SHADOW_SYNC_BATCH_SIZE (default 500)",
+    );
+  }
+  return DEFAULT_BATCH_SIZE;
 }

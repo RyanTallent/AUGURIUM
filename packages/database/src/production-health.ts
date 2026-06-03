@@ -1,7 +1,9 @@
 import { prisma } from "./client.js";
 
 export interface ShadowSyncRunStats {
+  selected: number | null;
   processed: number;
+  updated: number | null;
   fresh: number;
   stale: number;
   noSource: number;
@@ -22,7 +24,9 @@ export interface ProductionHealthReport {
   shadowPriceStatusCounts: Record<string, number>;
   latestScoreTradersRun: IngestionRunSummary | null;
   latestShadowSyncRun: IngestionRunSummary | null;
+  latestShadowSyncSelected: number | null;
   latestShadowSyncProcessed: number | null;
+  latestShadowSyncUpdated: number | null;
   generatedAt: string;
 }
 
@@ -36,18 +40,39 @@ export interface IngestionRunSummary {
 
 const MIN_TRADES_ELIGIBLE = Number(process.env.SCORE_MIN_TRADES ?? "5");
 
-function parseShadowSyncStats(metadata: unknown): ShadowSyncRunStats | null {
+export function parseShadowSyncStats(metadata: unknown): ShadowSyncRunStats | null {
   if (!metadata || typeof metadata !== "object") return null;
   const m = metadata as Record<string, unknown>;
-  if (typeof m.processed !== "number") return null;
-  return {
-    processed: m.processed,
-    fresh: typeof m.fresh === "number" ? m.fresh : 0,
-    stale: typeof m.stale === "number" ? m.stale : 0,
-    noSource: typeof m.noSource === "number" ? m.noSource : 0,
-    noUpdate: typeof m.noUpdate === "number" ? m.noUpdate : 0,
-    closed: typeof m.closed === "number" ? m.closed : 0,
-  };
+
+  if (typeof m.processed === "number") {
+    return {
+      selected: typeof m.selected === "number" ? m.selected : null,
+      processed: m.processed,
+      updated: typeof m.updated === "number" ? m.updated : null,
+      fresh: typeof m.fresh === "number" ? m.fresh : 0,
+      stale: typeof m.stale === "number" ? m.stale : 0,
+      noSource: typeof m.noSource === "number" ? m.noSource : 0,
+      noUpdate: typeof m.noUpdate === "number" ? m.noUpdate : 0,
+      closed: typeof m.closed === "number" ? m.closed : 0,
+    };
+  }
+
+  if (typeof m.updated === "number") {
+    const updated = m.updated;
+    const created = typeof m.created === "number" ? m.created : 0;
+    return {
+      selected: null,
+      processed: updated + created,
+      updated,
+      fresh: typeof m.priceFresh === "number" ? m.priceFresh : 0,
+      stale: typeof m.priceStale === "number" ? m.priceStale : 0,
+      noSource: typeof m.priceNoSource === "number" ? m.priceNoSource : 0,
+      noUpdate: typeof m.priceNoUpdate === "number" ? m.priceNoUpdate : 0,
+      closed: typeof m.closed === "number" ? m.closed : 0,
+    };
+  }
+
+  return null;
 }
 
 export async function getProductionHealthReport(): Promise<ProductionHealthReport> {
@@ -109,7 +134,10 @@ export async function getProductionHealthReport(): Promise<ProductionHealthRepor
     shadowPriceStatusCounts,
     latestScoreTradersRun: mapRun(latestScoreTradersRun),
     latestShadowSyncRun: mapRun(latestShadowSyncRun),
-    latestShadowSyncProcessed: shadowStats?.processed ?? latestShadowSyncRun?.itemCount ?? null,
+    latestShadowSyncSelected: shadowStats?.selected ?? shadowStats?.processed ?? null,
+    latestShadowSyncProcessed:
+      shadowStats?.processed ?? latestShadowSyncRun?.itemCount ?? null,
+    latestShadowSyncUpdated: shadowStats?.updated ?? null,
     generatedAt: new Date().toISOString(),
   };
 }
