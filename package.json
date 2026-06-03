@@ -1,0 +1,23 @@
+{
+  "name": "augurium",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Prediction Market Intelligence Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@augurium/web",
+    "dev:worker": "npm run dev --workspace=@augurium/worker",
+    "build": "npm run build --workspaces --if-present",
+    "db:generate": "npm run generate --workspace=@augurium/database",
+    "db:push": "npm run push --workspace=@augurium/database",
+    "db:studio": "npm run studio --workspace=@augurium/database",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

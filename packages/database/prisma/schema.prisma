@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Market {
+  id          String   @id @default(cuid())
+  externalId  String   @unique
+  source      String   @default("polymarket")
+  title       String
+  slug        String?
+  category    String?
+  endDate     DateTime?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  positions Position[]
+  signals   Signal[]
+}
+
+model Trader {
+  id        String   @id @default(cuid())
+  address   String   @unique
+  label     String?
+  score     Float    @default(0)
+  winRate   Float    @default(0)
+  roi       Float    @default(0)
+  trades    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  positions Position[]
+}
+
+model Position {
+  id        String   @id @default(cuid())
+  traderId  String
+  marketId  String
+  side      String
+  size      Float
+  avgPrice  Float
+  pnl       Float    @default(0)
+  openedAt  DateTime @default(now())
+  closedAt  DateTime?
+
+  trader Trader @relation(fields: [traderId], references: [id])
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([traderId])
+  @@index([marketId])
+}
+
+model Signal {
+  id         String   @id @default(cuid())
+  marketId   String
+  side       String
+  confidence Float
+  rationale  String
+  status     String   @default("active")
+  createdAt  DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([marketId])
+  @@index([createdAt])
+}
+
+model PortfolioSnapshot {
+  id           String   @id @default(cuid())
+  totalValue   Float
+  allocations  Json
+  sharpeRatio  Float?
+  maxDrawdown  Float?
+  capturedAt   DateTime @default(now())
+}
+
+model IngestionRun {
+  id         String   @id @default(cuid())
+  source     String
+  status     String
+  itemCount  Int      @default(0)
+  error      String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+}
