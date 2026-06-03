@@ -1,100 +1,87 @@
 import { Redis } from "ioredis";
 import { prisma } from "@augurium/database";
-import { QUEUES, WORKER_QUEUES } from "@augurium/shared";
-import { ingestPolymarketMarkets } from "./jobs/ingest-markets.js";
-import { ingestGlobalTrades } from "./jobs/ingest-trades.js";
-import { linkTradesToMarkets } from "./jobs/link-trades.js";
-import { discoverWalletsFromHolders } from "./jobs/discover-wallets.js";
-import { ingestWalletActivity } from "./jobs/ingest-wallet-activity.js";
-import { syncPositionsFromApi } from "./jobs/sync-positions.js";
-import { reconstructPositionsFromTrades } from "./jobs/reconstruct-positions.js";
-import { scoreTraders } from "./engines/scoring.js";
-import { generateSignals } from "./engines/signals.js";
-import { syncShadowPortfolio } from "./engines/shadow.js";
-import { dispatchDiscordEvents, processDiscordNotifications } from "./engines/discord.js";
-import { runPortfolioEngine } from "./engines/portfolio.js";
-import { runExecutionEngine } from "./engines/execution.js";
+import {
+  formatScheduleSummary,
+  getQueueIntervalMs,
+  isQueueDue,
+  jobNameForQueue,
+  PERIODIC_ANALYSIS_QUEUES,
+  WORKER_QUEUES,
+} from "./lib/queue-scheduler.js";
+import { runQueueJob } from "./lib/run-queue-job.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
 
 const redis = new Redis(REDIS_URL);
+const lastRunAtMs = new Map<string, number>();
 
-async function processQueue(queue: string): Promise<void> {
-  const payload = await redis.lpop(queue);
-  if (!payload) return;
-
-  console.log(`[worker] processing ${queue}:`, payload);
-
-  switch (queue) {
-    case QUEUES.MARKET_INGEST:
-      await ingestPolymarketMarkets();
-      break;
-    case QUEUES.TRADE_INGEST:
-      await ingestGlobalTrades();
-      break;
-    case QUEUES.TRADE_LINK:
-      await linkTradesToMarkets();
-      break;
-    case QUEUES.WALLET_DISCOVER:
-      await discoverWalletsFromHolders();
-      break;
-    case QUEUES.WALLET_ACTIVITY:
-      await ingestWalletActivity();
-      break;
-    case QUEUES.POSITION_SYNC:
-      await syncPositionsFromApi();
-      break;
-    case QUEUES.POSITION_RECONSTRUCT:
-      await reconstructPositionsFromTrades();
-      break;
-    case QUEUES.TRADER_SCORE:
-      await scoreTraders();
-      break;
-    case QUEUES.SIGNAL_GENERATE:
-      await generateSignals();
-      break;
-    case QUEUES.SHADOW_SYNC:
-      await syncShadowPortfolio();
-      break;
-    case QUEUES.DISCORD_ENQUEUE: {
-      const { runDiscordEnqueueJob } = await import("./jobs/discord-enqueue.js");
-      await runDiscordEnqueueJob();
-      break;
+async function drainRedisTriggers(): Promise<void> {
+  for (const queue of WORKER_QUEUES) {
+    let drained = 0;
+    while (await redis.lpop(queue)) {
+      drained++;
     }
-    case QUEUES.DISCORD_DISPATCH:
-      await dispatchDiscordEvents();
-      break;
-    case QUEUES.DISCORD_NOTIFY:
-      await processDiscordNotifications();
-      break;
-    case QUEUES.PORTFOLIO_RUN:
-      await runPortfolioEngine();
-      break;
-    case QUEUES.EXECUTION_RUN:
-      await runExecutionEngine();
-      break;
-    default:
-      console.warn(`[worker] unknown queue: ${queue}`);
+    if (drained > 0) {
+      console.log(`[worker] drained ${drained} redis trigger(s) from queue=${queue}`);
+    }
+  }
+}
+
+async function hasRedisTrigger(queue: string): Promise<boolean> {
+  const len = await redis.llen(queue);
+  if (len > 0) {
+    await redis.lpop(queue);
+    return true;
+  }
+  return false;
+}
+
+async function executeQueue(queue: string, reason: "interval" | "redis"): Promise<void> {
+  const job = jobNameForQueue(queue);
+  const started = Date.now();
+  console.log(`[worker] job start job=${job} queue=${queue} reason=${reason}`);
+  try {
+    const counts = await runQueueJob(queue);
+    console.log(
+      `[worker] job done job=${job} queue=${queue} reason=${reason} durationMs=${Date.now() - started}`,
+      counts,
+    );
+  } catch (err) {
+    console.error(
+      `[worker] job failed job=${job} queue=${queue} reason=${reason} durationMs=${Date.now() - started}`,
+      err,
+    );
+  } finally {
+    lastRunAtMs.set(queue, Date.now());
   }
 }
 
 async function tick(): Promise<void> {
   for (const queue of WORKER_QUEUES) {
-    await processQueue(queue);
+    const triggered = await hasRedisTrigger(queue);
+    const due = triggered || isQueueDue(queue, lastRunAtMs.get(queue));
+    if (!due) continue;
+    await executeQueue(queue, triggered ? "redis" : "interval");
   }
 }
 
 async function bootstrap(): Promise<void> {
   console.log("[worker] AUGURIUM worker starting (Phase A–G)");
   console.log("[worker] redis:", REDIS_URL);
+  console.log("[worker] poll interval ms:", POLL_INTERVAL_MS);
+  console.log("[worker] periodic analysis schedule:", formatScheduleSummary());
+
+  for (const queue of PERIODIC_ANALYSIS_QUEUES) {
+    console.log(
+      `[worker] scheduled job=${jobNameForQueue(queue)} queue=${queue} intervalMs=${getQueueIntervalMs(queue)}`,
+    );
+  }
 
   await redis.ping();
   console.log("[worker] redis connected");
 
-  for (const queue of WORKER_QUEUES) {
-    await redis.rpush(queue, "bootstrap");
-  }
+  await drainRedisTriggers();
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));

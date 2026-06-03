@@ -35,7 +35,18 @@ npm run backfill:categories
 npm run verify:production-health
 ```
 
-Worker queues (Redis): ensure `score-traders`, `signal:generate`, and `shadow:sync` run on schedule.
+Worker periodic jobs (Render `augurium-worker`): the worker loop runs these on an interval (not only once at boot):
+
+| Job | Redis queue | Default interval |
+|-----|-------------|------------------|
+| score-traders | `trader:score` | 90s |
+| signal:generate | `signal:generate` | 120s |
+| shadow:sync | `shadow:sync` | 120s |
+| portfolio:run | `portfolio:run` | 300s |
+| discord:enqueue | `discord:enqueue` | 300s |
+| discord:dispatch | `discord:dispatch` | 60s |
+
+Override per queue: `WORKER_INTERVAL_TRADER_SCORE_MS`, `WORKER_INTERVAL_SHADOW_SYNC_MS`, etc. Disable periodic runs: `WORKER_PERIODIC_JOBS_ENABLED=false` (redis `LPUSH` triggers only).
 
 ## Safety
 
