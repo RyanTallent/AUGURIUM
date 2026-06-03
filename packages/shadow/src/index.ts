@@ -5,3 +5,4 @@ export * from "./simulate.js";
 export * from "./replay.js";
 export * from "./price-update.js";
 export * from "./entry.js";
+export * from "./roi.js";

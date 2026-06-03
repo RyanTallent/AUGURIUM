@@ -15,7 +15,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
-    "test": "npx tsx --test src/shadow.test.ts src/price-update.test.ts src/math.test.ts"
+    "test": "npx tsx --test src/shadow.test.ts src/price-update.test.ts src/math.test.ts src/roi.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

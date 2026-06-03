@@ -22,6 +22,7 @@
     "migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@augurium/shadow": "*",
     "@prisma/client": "^6.9.0"
   },
   "devDependencies": {

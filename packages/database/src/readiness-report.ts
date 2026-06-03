@@ -2,9 +2,10 @@ import { getProductionHealthReport } from "./production-health.js";
 import { computeShadowAnalytics } from "./shadow-analytics.js";
 import { auditShadowDuplicates } from "./shadow-duplicates.js";
 import { computeSignalValidation } from "./signal-validation.js";
-import { computeTraderReliability } from "./trader-reliability.js";
 import { computePortfolioValidation } from "./portfolio-validation.js";
 import { computePaperValidation } from "./paper-validation.js";
+import { computeShadowRoiForensics } from "./shadow-roi-forensics.js";
+import { auditShadowFreshness } from "./shadow-freshness-audit.js";
 import type { ReadinessGrade } from "./portfolio-validation.js";
 
 export interface ReadinessSection {
@@ -18,60 +19,80 @@ export interface LiveTradingReadinessReport {
   overallScore: number;
   overallGrade: ReadinessGrade;
   liveTradingAllowed: boolean;
+  liveTradingReady: boolean;
   blockers: string[];
+  warnings: string[];
   sections: ReadinessSection[];
+  shadowAnalyticsTrustworthy: boolean;
+  roiAnomalyCount: number;
+  duplicateActiveGroups: number;
+  paperProgressLabel: string;
+  zeroRoiBreakdown: Record<string, number>;
   generatedAt: string;
 }
 
-function gradeFromBool(pass: boolean, warn = false): ReadinessGrade {
-  if (pass) return "PASS";
-  if (warn) return "WARNING";
-  return "FAIL";
-}
+const ROI_ANOMALY_FAIL_THRESHOLD = Number(
+  process.env.READINESS_ROI_ANOMALY_MAX ?? "3",
+);
+const STALE_SHADOW_WARNING_PCT = Number(
+  process.env.READINESS_STALE_SHADOW_PCT ?? "50",
+);
 
 export async function computeLiveTradingReadiness(): Promise<LiveTradingReadinessReport> {
-  const [
-    health,
-    shadow,
-    duplicates,
-    signals,
-    traders,
-    portfolio,
-    paper,
-  ] = await Promise.all([
-    getProductionHealthReport(),
-    computeShadowAnalytics(),
-    auditShadowDuplicates(),
-    computeSignalValidation(),
-    computeTraderReliability(100),
-    computePortfolioValidation(),
-    computePaperValidation(),
-  ]);
+  const [health, shadow, duplicates, signals, portfolio, paper, forensics, freshness] =
+    await Promise.all([
+      getProductionHealthReport(),
+      computeShadowAnalytics(),
+      auditShadowDuplicates(),
+      computeSignalValidation(),
+      computePortfolioValidation(),
+      computePaperValidation(),
+      computeShadowRoiForensics(),
+      auditShadowFreshness(),
+    ]);
 
   const blockers: string[] = [];
+  const warnings: string[] = [];
 
-  const shadowTrustworthy =
-    shadow.sampleSize >= 50 &&
-    shadow.zeroRoiClosedPct < 0.6 &&
-    shadow.zeroMfePct < 0.7;
-  if (!shadowTrustworthy) {
-    blockers.push("Shadow analytics not trustworthy (high zero ROI/MFE)");
+  const roiAnomalyCount = forensics.corruptTradeCount;
+
+  if (!shadow.analyticsTrustworthy) {
+    blockers.push("Shadow analytics corrupted or untrustworthy");
+  }
+  if (roiAnomalyCount > ROI_ANOMALY_FAIL_THRESHOLD) {
+    blockers.push(
+      `ROI anomalies: ${roiAnomalyCount} trades exceed ${ROI_ANOMALY_FAIL_THRESHOLD} threshold`,
+    );
   }
   if (duplicates.duplicateActiveGroups > 0) {
     blockers.push(`${duplicates.duplicateActiveGroups} duplicate active shadow groups`);
   }
+  if (!paper.meetsMinimumSample) {
+    blockers.push(`Paper validation ${paper.progressLabel} (need 100 closes)`);
+  }
   if (!health.shadowSyncRunAcceptable) {
     blockers.push("Shadow sync run not acceptable");
   }
-  if (health.shadowStalePct > 0.5) {
-    blockers.push(`Shadow pricing stale (${(health.shadowStalePct * 100).toFixed(0)}%)`);
+
+  if (health.shadowStalePct > STALE_SHADOW_WARNING_PCT) {
+    warnings.push(`Stale shadow pricing ${health.shadowStalePct.toFixed(0)}%`);
   }
-  if (!paper.meetsMinimumSample) {
-    blockers.push(`Paper trades ${paper.completedTrades}/100 minimum`);
+  if (!health.scoringHealthy) {
+    warnings.push("Scoring backlog on eligible wallets");
   }
-  if (paper.expectedValue <= 0 && paper.completedTrades >= 20) {
-    blockers.push("Paper expected value not positive");
+  if ((signals.activeByType.TRADE_NOW ?? 0) === 0 && signals.recentBaseTradeNowCount > 0) {
+    warnings.push("TRADE_NOW quality gates block all promotions");
   }
+  if (!freshness.sumMatchesTotal) {
+    warnings.push("Shadow freshness counts do not sum to total");
+  }
+
+  const shadowGrade: ReadinessGrade =
+    shadow.analyticsTrustworthy &&
+    duplicates.duplicateActiveGroups === 0 &&
+    roiAnomalyCount <= ROI_ANOMALY_FAIL_THRESHOLD
+      ? "PASS"
+      : "FAIL";
 
   const sections: ReadinessSection[] = [
     {
@@ -89,41 +110,41 @@ export async function computeLiveTradingReadiness(): Promise<LiveTradingReadines
       details: {
         scoredWallets: health.scoredWallets,
         unscoredEligibleRemaining: health.unscoredEligibleRemaining,
-        scoreCoverageEligiblePct: health.scoreCoverageEligiblePct,
       },
     },
     {
       name: "Signals",
-      grade: gradeFromBool(
-        Object.keys(signals.tradeNowRejectedReasons).length > 0 ||
-          signals.tradeNowNearMisses === 0,
-        true,
-      ),
-      summary: `TRADE_NOW near-misses (7d): ${signals.tradeNowNearMisses}`,
+      grade: "WARNING",
+      summary: `Active TRADE_NOW: ${signals.activeByType.TRADE_NOW ?? 0}`,
       details: signals as unknown as Record<string, unknown>,
     },
     {
       name: "Shadow",
-      grade: shadowTrustworthy && duplicates.duplicateActiveGroups === 0 ? "PASS" : "FAIL",
-      summary: `${shadow.sampleSize} closed/expired · ${(shadow.zeroRoiClosedPct * 100).toFixed(0)}% zero ROI`,
-      details: { shadow, duplicates },
+      grade: shadowGrade,
+      summary: `Trustworthy: ${shadow.analyticsTrustworthy} · anomalies: ${roiAnomalyCount} · zero ROI: ${(shadow.zeroRoiClosedPct * 100).toFixed(0)}%`,
+      details: {
+        shadow,
+        duplicates,
+        forensics: { diagnosis: forensics.diagnosis, corruptTradeCount: roiAnomalyCount },
+        freshness,
+      },
     },
     {
       name: "Portfolio",
       grade: portfolio.grade,
-      summary: `${portfolio.openPositions} open · accept ${(portfolio.allocationAcceptRate * 100).toFixed(0)}%`,
+      summary: `${portfolio.openPositions} open positions`,
       details: portfolio as unknown as Record<string, unknown>,
     },
     {
       name: "Execution",
-      grade: paper.grade,
-      summary: `${paper.completedTrades} paper closes · EV ${(paper.expectedValue * 100).toFixed(2)}%`,
+      grade: paper.meetsMinimumSample && paper.expectedValue > 0 ? "PASS" : "FAIL",
+      summary: `Paper ${paper.progressLabel} · opens ${paper.paperOpens}`,
       details: paper as unknown as Record<string, unknown>,
     },
     {
       name: "Discord",
       grade: "WARNING",
-      summary: "Configured via env — verify DISCORD_ENABLED in production",
+      summary: "Env-gated — verify DISCORD_ENABLED",
       details: {},
     },
   ];
@@ -132,11 +153,11 @@ export async function computeLiveTradingReadiness(): Promise<LiveTradingReadines
   const overallScore = Math.round((passCount / sections.length) * 100);
   let overallGrade: ReadinessGrade = "WARNING";
   if (blockers.length === 0 && overallScore >= 85) overallGrade = "PASS";
-  if (blockers.length > 2 || !shadowTrustworthy) overallGrade = "FAIL";
+  if (blockers.length > 0) overallGrade = "FAIL";
 
   const liveTradingAllowed =
     blockers.length === 0 &&
-    shadowTrustworthy &&
+    shadow.analyticsTrustworthy &&
     paper.meetsMinimumSample &&
     paper.expectedValue > 0;
 
@@ -144,8 +165,15 @@ export async function computeLiveTradingReadiness(): Promise<LiveTradingReadines
     overallScore,
     overallGrade,
     liveTradingAllowed,
+    liveTradingReady: liveTradingAllowed,
     blockers,
+    warnings,
     sections,
+    shadowAnalyticsTrustworthy: shadow.analyticsTrustworthy,
+    roiAnomalyCount,
+    duplicateActiveGroups: duplicates.duplicateActiveGroups,
+    paperProgressLabel: paper.progressLabel,
+    zeroRoiBreakdown: shadow.zeroRoiBreakdown.byCategory,
     generatedAt: new Date().toISOString(),
   };
 }

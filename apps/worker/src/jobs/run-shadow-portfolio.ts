@@ -8,6 +8,7 @@ import {
   priceAtOrAfter,
   resolveShadowPrice,
   runAllSimulations,
+  isPlausibleEntryPrice,
   shadowEntryMs,
   updateExcursions,
 } from "@augurium/shadow";
@@ -172,7 +173,12 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         entryResolved.currentPrice ??
         (sources.tape.length ? sources.tape[sources.tape.length - 1]!.price : 0.5);
 
-      if (entryPrice <= 0) continue;
+      if (entryPrice <= 0 || !isPlausibleEntryPrice(entryPrice)) {
+        console.warn(
+          `[shadow:open] skip signal=${signal.id} implausible entry=${entryPrice}`,
+        );
+        continue;
+      }
 
       const postEntry = resolveShadowPrice({
         entryMs,

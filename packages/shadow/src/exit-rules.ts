@@ -8,6 +8,7 @@ import {
   type ShadowStatus,
 } from "./types.js";
 import { directionalRoi, pnlFromRoi } from "./math.js";
+import { closedPositionRoi } from "./roi.js";
 
 export interface ExitContext {
   currentPrice: number;
@@ -124,7 +125,7 @@ export function applyAuguriumExitRules(
       realizedPnl += pnlFromRoi(roi, state.simulatedSizeUsd, positionRemaining);
       positionRemaining = 0;
     }
-    const totalRoi = safeTotalRoi(realizedPnl, state.simulatedSizeUsd);
+    const totalRoi = closedPositionRoi(realizedPnl, state.simulatedSizeUsd);
     const missed = Math.max(0, maxFavorableExcursion - totalRoi) * state.simulatedSizeUsd;
     return {
       state: {
@@ -152,7 +153,3 @@ export function applyAuguriumExitRules(
   return { state: updated, decision: null };
 }
 
-function safeTotalRoi(realizedPnl: number, sizeUsd: number): number {
-  if (sizeUsd <= 0) return 0;
-  return realizedPnl / sizeUsd;
-}

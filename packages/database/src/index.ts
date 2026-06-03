@@ -20,6 +20,21 @@ export {
   type ShadowAnalyticsReport,
 } from "./shadow-analytics.js";
 export {
+  computeShadowRoiForensics,
+  listShadowForensicRows,
+  type ShadowRoiForensicsReport,
+  type ShadowTradeForensicRow,
+} from "./shadow-roi-forensics.js";
+export {
+  computeZeroRoiBreakdown,
+  type ZeroRoiBreakdown,
+  type ZeroRoiCategory,
+} from "./shadow-zero-roi.js";
+export {
+  auditShadowFreshness,
+  type ShadowFreshnessAudit,
+} from "./shadow-freshness-audit.js";
+export {
   auditShadowDuplicates,
   type ShadowDuplicateReport,
 } from "./shadow-duplicates.js";
