@@ -15,10 +15,11 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/**/*.test.js"
+    "test": "npx tsx --test src/discord.test.ts src/discord-env.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
 }

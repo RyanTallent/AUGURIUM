@@ -10,3 +10,6 @@ export * from "./system-confidence.js";
 export * from "./watchlist.js";
 export * from "./reasoning.js";
 export * from "./pipeline.js";
+export * from "./evidence.js";
+export { computeSystemConfidenceBreakdown } from "./system-confidence.js";
+export { getSignalWindowMinutes } from "./pipeline.js";

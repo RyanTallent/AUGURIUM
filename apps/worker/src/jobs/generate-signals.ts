@@ -6,7 +6,12 @@ import {
   type SystemConfidenceInput,
 } from "@augurium/intelligence";
 
-const LOOKBACK_DAYS = Number(process.env.SIGNAL_LOOKBACK_DAYS ?? "7");
+const WINDOW_MINUTES = Number(
+  process.env.SIGNAL_WINDOW_MINUTES ??
+    (process.env.SIGNAL_LOOKBACK_DAYS
+      ? String(Number(process.env.SIGNAL_LOOKBACK_DAYS) * 24 * 60)
+      : "1440"),
+);
 const SIGNAL_TTL_HOURS = Number(process.env.SIGNAL_TTL_HOURS ?? "6");
 const MAX_MARKETS_PER_RUN = Number(process.env.SIGNAL_MAX_MARKETS ?? "200");
 
@@ -22,7 +27,7 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
   });
 
   const now = new Date();
-  const cutoff = new Date(now.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(now.getTime() - WINDOW_MINUTES * 60 * 1000);
   const expiresAt = new Date(now.getTime() + SIGNAL_TTL_HOURS * 60 * 60 * 1000);
   const byType: Record<string, number> = {};
   let generated = 0;
@@ -59,6 +64,8 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
         market: {
           select: {
             id: true,
+            title: true,
+            category: true,
             conditionId: true,
             active: true,
             closed: true,
@@ -94,6 +101,32 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
       orderBy: { finishedAt: "desc" },
     });
 
+    const [marketTotal, categorizedMarkets, shadowTotal, shadowFresh] = await Promise.all([
+      prisma.market.count(),
+      prisma.market.count({
+        where: {
+          AND: [
+            { category: { not: null } },
+            { category: { notIn: ["", "Other", "uncategorized"] } },
+          ],
+        },
+      }),
+      prisma.shadowTrade.count(),
+      prisma.shadowTrade.count({
+        where: { priceStatus: "FRESH" },
+      }),
+    ]);
+
+    const tapeCoveragePct =
+      marketIds.length > 0
+        ? Math.min(
+            100,
+            Math.round(
+              (recentTrades.filter((t) => t.marketId).length / recentTrades.length) * 100,
+            ),
+          )
+        : 0;
+
     const systemInput: SystemConfidenceInput = {
       totalTrades: await prisma.trade.count(),
       recentTrades: recentTrades.length,
@@ -104,6 +137,10 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
       lastIngestSuccessAt: lastIngest?.finishedAt ?? null,
       lastScoreSuccessAt: lastScore?.finishedAt ?? null,
       lastSignalRunSuccess: true,
+      categorizedMarketsPct:
+        marketTotal > 0 ? (categorizedMarkets / marketTotal) * 100 : 0,
+      shadowPriceFreshPct: shadowTotal > 0 ? (shadowFresh / shadowTotal) * 100 : 0,
+      tapeCoveragePct,
       now,
     };
 
@@ -168,6 +205,7 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
       const evaluations = evaluateMarketSignals(
         marketId,
         market.conditionId,
+        market.category,
         consensusTrades,
         qualityInput,
         systemInput,
@@ -183,6 +221,7 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
           data: {
             marketId: ev.marketId,
             conditionId: ev.conditionId,
+            category: ev.category,
             side: ev.outcomeSide,
             outcome: ev.outcomeSide,
             signalType: ev.signalType,
@@ -196,6 +235,10 @@ export async function runGenerateSignalsJob(): Promise<GenerateSignalsSummary> {
             disagreementScore: ev.consensus.disagreementScore,
             triggerTradeIds: ev.consensus.triggerTradeIds,
             triggerTraderWallets: ev.consensus.triggerTraderWallets,
+            triggerNotional: ev.consensus.combinedNotional,
+            oldestTriggerTradeAt: ev.consensus.oldestTriggerTradeAt,
+            newestTriggerTradeAt: ev.consensus.newestTriggerTradeAt,
+            evidenceWindowMinutes: ev.evidenceWindowMinutes,
             reasoning: ev.reasoning,
             rationale: ev.reasoning,
             confidence: ev.systemConfidenceScore / 100,

@@ -1,5 +1,6 @@
 import { computeAlphaScore, computeCapitalEfficiency, computeMovementConfirmation } from "./alpha.js";
 import { computeMarketConsensusBySide } from "./consensus.js";
+import { applyEvidenceToSignalType, evaluateSignalEvidence } from "./evidence.js";
 import { computeMarketQualityScore } from "./market-quality.js";
 import { buildSignalReasoning } from "./reasoning.js";
 import { computeSystemConfidenceScore } from "./system-confidence.js";
@@ -12,11 +13,18 @@ import type {
   SystemConfidenceInput,
 } from "./types.js";
 
-const WINDOW_MINUTES = 7 * 24 * 60;
+const WINDOW_MINUTES = Number(
+  process.env.SIGNAL_WINDOW_MINUTES ?? process.env.SIGNAL_LOOKBACK_MINUTES ?? "1440",
+);
+
+export function getSignalWindowMinutes(): number {
+  return WINDOW_MINUTES;
+}
 
 export function evaluateMarketSignals(
   marketId: string,
   conditionId: string | null,
+  category: string | null,
   trades: ConsensusTradeInput[],
   qualityInput: MarketQualityInput,
   systemInput: SystemConfidenceInput,
@@ -41,6 +49,7 @@ export function evaluateMarketSignals(
     evaluations.push({
       marketId,
       conditionId,
+      category,
       outcomeSide: "UNKNOWN",
       consensus: {
         outcomeSide: "UNKNOWN",
@@ -54,6 +63,9 @@ export function evaluateMarketSignals(
         triggerTradeIds: [],
         triggerTraderWallets: [],
         medianCopiedRoi: 0,
+        combinedNotional: 0,
+        oldestTriggerTradeAt: null,
+        newestTriggerTradeAt: null,
       },
       opposingConsensus: 0,
       marketQualityScore,
@@ -63,6 +75,7 @@ export function evaluateMarketSignals(
       reasoning: buildSignalReasoning({
         signalType: "IGNORE",
         outcomeSide: "UNKNOWN",
+        category,
         consensus: {
           outcomeSide: "UNKNOWN",
           consensusScore: 0,
@@ -75,6 +88,9 @@ export function evaluateMarketSignals(
           triggerTradeIds: [],
           triggerTraderWallets: [],
           medianCopiedRoi: 0,
+          combinedNotional: 0,
+          oldestTriggerTradeAt: null,
+          newestTriggerTradeAt: null,
         },
         alphaScore: 0,
         marketQualityScore,
@@ -82,11 +98,15 @@ export function evaluateMarketSignals(
         disagreementScore: 0,
         skipReason: "No alignable outcome-side activity from scored traders",
         windowMinutes: WINDOW_MINUTES,
+        evidenceNote: null,
       }),
       skipReason: "no-outcome-activity",
+      evidenceWindowMinutes: WINDOW_MINUTES,
     });
     return evaluations;
   }
+
+  const hasSuperElite = trades.some((t) => t.trader.tier === "SUPER_ELITE");
 
   for (const [, consensus] of consensusBySide) {
     const capitalEfficiency = computeCapitalEfficiency(
@@ -101,27 +121,43 @@ export function evaluateMarketSignals(
       movementConfirmation,
     });
 
+    const uniqueTraders = consensus.triggerTraderWallets.length;
     const hasScoredTraderActivity = consensus.tradeCount > 0;
     const insufficientData =
-      consensus.tradeCount < 1 ||
-      systemConfidenceScore < 25 ||
-      consensus.copyabilityScore < 0.1;
+      uniqueTraders < 2 ||
+      systemConfidenceScore < 30 ||
+      consensus.copyabilityScore < 0.12 ||
+      (consensus.combinedNotional < 200 && !hasSuperElite);
 
-    const signalType = classifySignalType({
+    const baseType = classifySignalType({
       consensusScore: consensus.consensusScore,
       alphaScore,
       marketQualityScore,
       systemConfidenceScore,
       hasScoredTraderActivity,
       insufficientData,
+      uniqueTraders,
+      disagreementScore: consensus.disagreementScore,
     });
+
+    const evidence = evaluateSignalEvidence({
+      consensus,
+      marketQualityScore,
+      systemConfidenceScore,
+      hasSuperElite,
+    });
+
+    const signalType = applyEvidenceToSignalType(baseType, evidence);
 
     const forcedType =
       insufficientData && signalType === "TRADE_NOW" ? "RESEARCH" : signalType;
 
+    const evidenceNote = evidence.downgradeReason;
+
     evaluations.push({
       marketId,
       conditionId,
+      category,
       outcomeSide: consensus.outcomeSide,
       consensus,
       opposingConsensus: consensus.opposingConsensus,
@@ -132,6 +168,7 @@ export function evaluateMarketSignals(
       reasoning: buildSignalReasoning({
         signalType: forcedType,
         outcomeSide: consensus.outcomeSide,
+        category,
         consensus,
         alphaScore,
         marketQualityScore,
@@ -139,8 +176,10 @@ export function evaluateMarketSignals(
         disagreementScore: consensus.disagreementScore,
         skipReason: insufficientData ? "Insufficient data for high-conviction TRADE_NOW" : null,
         windowMinutes: WINDOW_MINUTES,
+        evidenceNote,
       }),
       skipReason: insufficientData ? "insufficient-data" : null,
+      evidenceWindowMinutes: WINDOW_MINUTES,
     });
   }
 

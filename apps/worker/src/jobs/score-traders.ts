@@ -1,5 +1,10 @@
 import { prisma } from "@augurium/database";
-import { computeTraderMetrics, type PositionInput, type TradeInput } from "@augurium/scoring";
+import {
+  computeTraderMetrics,
+  normalizeMarketCategory,
+  type PositionInput,
+  type TradeInput,
+} from "@augurium/scoring";
 import { buildMarketTapesForKeys } from "../lib/market-tapes.js";
 
 const TRADERS_PER_RUN = Number(process.env.SCORE_TRADERS_BATCH_SIZE ?? "50");
@@ -22,14 +27,19 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
   const now = new Date();
 
   try {
-    const traders = await prisma.trader.findMany({
-      where: {
-        trades: { gte: MIN_TRADES_TO_SCORE },
-        lastScoredAt: null,
-      },
-      orderBy: [{ trades: "desc" }, { updatedAt: "asc" }],
-      take: TRADERS_PER_RUN,
+    const candidateTraders = await prisma.trader.findMany({
+      where: { trades: { gte: MIN_TRADES_TO_SCORE } },
+      orderBy: [{ lastScoredAt: "asc" }, { trades: "desc" }],
+      take: TRADERS_PER_RUN * 3,
     });
+
+    const traders = candidateTraders
+      .filter(
+        (t) =>
+          t.lastScoredAt == null ||
+          (t.lastActivityAt != null && t.lastActivityAt > t.lastScoredAt),
+      )
+      .slice(0, TRADERS_PER_RUN);
 
     if (traders.length === 0) {
       await prisma.ingestionRun.update({
@@ -47,7 +57,7 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
     for (const trader of traders) {
       const tradeRows = await prisma.trade.findMany({
         where: { traderId: trader.id },
-        include: { market: { select: { category: true } } },
+        include: { market: { select: { category: true, title: true } } },
         orderBy: { tradedAt: "asc" },
       });
 
@@ -71,12 +81,15 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
         conditionId: t.conditionId,
         asset: t.asset,
         marketId: t.marketId,
-        category: t.market?.category ?? null,
+        category: normalizeMarketCategory({
+          gammaCategory: t.market?.category,
+          title: t.market?.title,
+        }),
       }));
 
       const positionRows = await prisma.position.findMany({
         where: { traderId: trader.id },
-        include: { market: { select: { category: true } } },
+        include: { market: { select: { category: true, title: true } } },
       });
 
       const positions: PositionInput[] = positionRows.map((p) => ({
@@ -84,7 +97,9 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
         size: p.size,
         avgPrice: p.avgPrice,
         status: p.status,
-        category: p.market?.category ?? null,
+        category: normalizeMarketCategory({
+          gammaCategory: p.market?.category,
+        }),
       }));
 
       const metrics = computeTraderMetrics(trades, positions, marketTapes, now);
@@ -142,6 +157,9 @@ export async function runScoreTradersJob(): Promise<ScoreTradersSummary> {
           specialistScore: metrics.specialistScore,
           lowConfidence: metrics.lowConfidence,
           skipReason: metrics.skipReason,
+          confidenceReason: metrics.confidenceReason,
+          rankingReason: metrics.rankingReason,
+          copyabilityReason: metrics.copyabilityReason,
           categoryMetrics: {
             create: metrics.categoryMetrics.map((c) => ({
               category: c.category,

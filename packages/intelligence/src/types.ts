@@ -50,11 +50,15 @@ export interface SideConsensusResult {
   triggerTradeIds: string[];
   triggerTraderWallets: string[];
   medianCopiedRoi: number;
+  combinedNotional: number;
+  oldestTriggerTradeAt: Date | null;
+  newestTriggerTradeAt: Date | null;
 }
 
 export interface MarketSignalEvaluation {
   marketId: string;
   conditionId: string | null;
+  category: string | null;
   outcomeSide: string;
   consensus: SideConsensusResult;
   opposingConsensus: number;
@@ -64,6 +68,7 @@ export interface MarketSignalEvaluation {
   signalType: SignalType;
   reasoning: string;
   skipReason: string | null;
+  evidenceWindowMinutes: number;
 }
 
 export interface SystemConfidenceInput {
@@ -76,5 +81,8 @@ export interface SystemConfidenceInput {
   lastIngestSuccessAt: Date | null;
   lastScoreSuccessAt: Date | null;
   lastSignalRunSuccess: boolean;
+  categorizedMarketsPct?: number;
+  shadowPriceFreshPct?: number;
+  tapeCoveragePct?: number;
   now: Date;
 }

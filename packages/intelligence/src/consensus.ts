@@ -65,10 +65,15 @@ export function computeSideConsensus(
       triggerTradeIds: [],
       triggerTraderWallets: [],
       medianCopiedRoi: 0,
+      combinedNotional: 0,
+      oldestTriggerTradeAt: null,
+      newestTriggerTradeAt: null,
     };
   }
 
   const notionals = sideTrades.map((t) => t.size * t.price);
+  const combinedNotional = notionals.reduce((a, b) => a + b, 0);
+  const tradeTimes = sideTrades.map((t) => t.tradedAt.getTime());
   const notionalMedian = median(notionals) || 1;
 
   let weightSum = 0;
@@ -105,6 +110,9 @@ export function computeSideConsensus(
     triggerTradeIds: sideTrades.map((t) => t.tradeId),
     triggerTraderWallets: [...wallets],
     medianCopiedRoi: median(copiedRois),
+    combinedNotional,
+    oldestTriggerTradeAt: new Date(Math.min(...tradeTimes)),
+    newestTriggerTradeAt: new Date(Math.max(...tradeTimes)),
   };
 }
 

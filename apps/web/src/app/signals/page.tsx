@@ -34,6 +34,7 @@ export default async function SignalsPage() {
           <thead>
             <tr>
               <th>Market</th>
+              <th>Category</th>
               <th>Side</th>
               <th>Type</th>
               <th>Consensus</th>
@@ -47,7 +48,7 @@ export default async function SignalsPage() {
           <tbody>
             {signals.length === 0 ? (
               <tr>
-                <td colSpan={9} className={tableStyles.empty}>
+                <td colSpan={10} className={tableStyles.empty}>
                   No active signals. Run{" "}
                   <code>npm run signals:generate</code> after Phase B scoring.
                 </td>
@@ -56,6 +57,7 @@ export default async function SignalsPage() {
               signals.map((s) => (
                 <tr key={s.id}>
                   <td title={s.reasoning}>{truncate(s.market.title, 40)}</td>
+                  <td>{s.category ?? s.market.category ?? "—"}</td>
                   <td>{s.side}</td>
                   <td>
                     <span className={tableStyles.tier}>{s.signalType}</span>
@@ -64,7 +66,9 @@ export default async function SignalsPage() {
                   <td>{s.alphaScore.toFixed(0)}</td>
                   <td>{s.marketQualityScore.toFixed(0)}</td>
                   <td>{s.systemConfidenceScore.toFixed(0)}</td>
-                  <td>{s.triggerTraderWallets.length}</td>
+                  <td title={`$${s.triggerNotional.toFixed(0)} notional`}>
+                    {s.triggerTraderWallets.length}
+                  </td>
                   <td>{new Date(s.createdAt).toLocaleString()}</td>
                 </tr>
               ))
@@ -103,7 +107,7 @@ async function loadSignals() {
     orderBy: [{ alphaScore: "desc" }, { createdAt: "desc" }],
     take: 100,
     include: {
-      market: { select: { title: true, slug: true } },
+      market: { select: { title: true, slug: true, category: true } },
     },
   });
 }

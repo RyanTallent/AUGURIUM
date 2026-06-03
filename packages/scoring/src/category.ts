@@ -1,4 +1,5 @@
 import type { CategoryMetricResult, RealizedRoundTrip, TradeInput } from "./types.js";
+import { normalizeMarketCategory } from "./categories.js";
 import { safeDivide } from "./math.js";
 import { winRateFromTrips } from "./round-trips.js";
 
@@ -9,14 +10,14 @@ export function computeCategoryMetrics(
   const categories = new Map<string, { trades: TradeInput[]; trips: RealizedRoundTrip[] }>();
 
   for (const t of trades) {
-    const cat = t.category ?? "uncategorized";
+    const cat = normalizeMarketCategory({ gammaCategory: t.category });
     const bucket = categories.get(cat) ?? { trades: [], trips: [] };
     bucket.trades.push(t);
     categories.set(cat, bucket);
   }
 
   for (const trip of trips) {
-    const cat = trip.category ?? "uncategorized";
+    const cat = normalizeMarketCategory({ gammaCategory: trip.category, title: trip.category });
     const bucket = categories.get(cat) ?? { trades: [], trips: [] };
     bucket.trips.push(trip);
     categories.set(cat, bucket);
@@ -62,5 +63,11 @@ export function pickSpecialistCategory(metrics: CategoryMetricResult[]): {
 } {
   if (!metrics.length) return { category: null, score: 0 };
   const top = metrics[0];
+  if (top.category === "Other" || top.tradeCount < 10 || top.volume < 200) {
+    return { category: null, score: 0 };
+  }
+  if (top.specialistScore < 0.35 || top.tradeCount < 15) {
+    return { category: null, score: 0 };
+  }
   return { category: top.category, score: top.specialistScore };
 }

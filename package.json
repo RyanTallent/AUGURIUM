@@ -39,6 +39,12 @@
     "execution:run": "npx tsx scripts/run-execution.mjs",
     "verify:phase-g": "node scripts/verify-phase-g.mjs",
     "paper:e2e": "npx tsx --env-file=.env scripts/run-paper-e2e-test.mjs",
+    "backfill:categories": "npm run build -w @augurium/scoring && node scripts/backfill-categories.mjs",
+    "verify:production-health": "node scripts/verify-production-health.mjs",
+    "verify:shadow-prices": "node scripts/verify-shadow-prices.mjs",
+    "verify:categories": "node scripts/verify-categories.mjs",
+    "verify:scoring-quality": "node scripts/verify-scoring-quality.mjs",
+    "verify:signal-quality": "node scripts/verify-signal-quality.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },

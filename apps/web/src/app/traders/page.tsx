@@ -88,10 +88,14 @@ export default async function TradersPage() {
                   <td>{(t.copyabilityScore * 100).toFixed(0)}</td>
                   <td>{fmtPct(t.estimatedCopiedRoi)}</td>
                   <td>{(t.informationEdgeScore * 100).toFixed(0)}</td>
-                  <td>{(t.confidenceScore * 100).toFixed(0)}</td>
+                  <td title={t.confidenceReason ?? undefined}>
+                    {(t.confidenceScore * 100).toFixed(0)}
+                  </td>
                   <td>{t.trades}</td>
                   <td>${t.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                  <td>{t.bestCategory ?? "—"}</td>
+                  <td title={t.rankingReason ?? undefined}>
+                    {t.specialistLabel ?? t.bestCategory ?? "—"}
+                  </td>
                   <td>{fmtPct(t.roi30d)}</td>
                 </tr>
               ))
@@ -108,11 +112,17 @@ async function loadTraders() {
     where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
     orderBy: { rankingScore: "desc" },
     take: 100,
-    include: {
+        include: {
       metricsSnapshots: {
         orderBy: { capturedAt: "desc" },
         take: 1,
-        select: { totalVolume: true, roi30d: true },
+        select: {
+          totalVolume: true,
+          roi30d: true,
+          confidenceReason: true,
+          rankingReason: true,
+          specialistCategory: true,
+        },
       },
     },
   });
@@ -129,6 +139,11 @@ async function loadTraders() {
     recentFormScore: t.recentFormScore,
     trades: t.trades,
     bestCategory: t.bestCategory,
+    specialistLabel: t.metricsSnapshots[0]?.specialistCategory
+      ? `${t.metricsSnapshots[0].specialistCategory} Specialist`
+      : null,
+    confidenceReason: t.metricsSnapshots[0]?.confidenceReason ?? null,
+    rankingReason: t.metricsSnapshots[0]?.rankingReason ?? null,
     lowConfidence: t.lowConfidence,
     totalVolume: t.metricsSnapshots[0]?.totalVolume ?? 0,
     roi30d: t.metricsSnapshots[0]?.roi30d ?? 0,

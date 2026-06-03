@@ -10,6 +10,7 @@ import {
   type DataApiTrade,
   type GammaMarketRecord,
 } from "./polymarket.js";
+import { normalizeMarketCategory } from "@augurium/scoring";
 import { storeRawPayload } from "./ingestion-store.js";
 
 export type MarketLinkMethod =
@@ -63,7 +64,12 @@ export function marketUpsertDataFromGamma(
     source: "polymarket",
     title: market.question ?? market.title ?? "Unknown market",
     slug: market.slug,
-    category: market.category,
+    category: normalizeMarketCategory({
+      gammaCategory: market.category,
+      title: market.question ?? market.title,
+      slug: market.slug,
+      eventSlug: eventMeta?.eventSlug ?? event?.slug,
+    }),
     endDate: market.endDate ? new Date(market.endDate) : null,
     active: (market.active ?? true) && !(market.closed ?? false),
     closed: market.closed ?? false,

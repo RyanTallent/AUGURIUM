@@ -7,11 +7,12 @@ import {
   DEFAULT_SIZE_USD,
   ENTRY_DELAYS_MS,
   priceAtOrAfter,
+  resolveShadowPrice,
   runAllSimulations,
   updateExcursions,
   type TapePoint,
 } from "@augurium/shadow";
-import { buildMarketTapesForKeys } from "../lib/market-tapes.js";
+import { buildMarketTapeForMarket, latestMarketTradePrice } from "../lib/market-tapes.js";
 
 const SHADOW_SIGNAL_TYPES = ["TRADE_NOW", "WATCHLIST", "RESEARCH"];
 const MAX_NEW_PER_RUN = Number(process.env.SHADOW_MAX_NEW ?? "100");
@@ -43,9 +44,8 @@ async function resolveTapeForMarket(
   const match =
     trades.find((t) => (t.outcome ?? "").toUpperCase() === normalized) ?? trades[0];
   const cid = conditionId ?? match.conditionId;
-  const key = `${cid}:${match.asset}`;
-  const tapes = await buildMarketTapesForKeys(new Set([key]));
-  return { tape: tapes.get(key) ?? [], asset: match.asset };
+  const tape = await buildMarketTapeForMarket(marketId, cid, match.asset);
+  return { tape, asset: match.asset };
 }
 
 export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
@@ -83,15 +83,33 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         signal.side,
       );
       const entryMs = signal.createdAt.getTime() + DEFAULT_ENTRY_DELAY_MS;
+      const entryResolved = resolveShadowPrice({
+        entryMs: signal.createdAt.getTime(),
+        entryPrice: 0,
+        side: signal.side,
+        tape,
+        now,
+      });
       const entryPrice =
         priceAtOrAfter(tape, entryMs) ??
+        entryResolved.currentPrice ??
         (tape.length ? tape[tape.length - 1].price : 0.5);
 
       if (entryPrice <= 0) continue;
 
+      const postEntry = resolveShadowPrice({
+        entryMs,
+        entryPrice,
+        side: signal.side,
+        tape,
+        marketSnapshotPrice: await latestMarketTradePrice(signal.marketId),
+        lastKnownPrice: entryPrice,
+        now,
+      });
+
       const metrics = computePositionMetrics(
         entryPrice,
-        entryPrice,
+        postEntry.currentPrice,
         DEFAULT_SIZE_USD,
         1,
         0,
@@ -106,17 +124,20 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
           side: signal.side,
           entryDelayMs: DEFAULT_ENTRY_DELAY_MS,
           simulatedEntryPrice: entryPrice,
-          currentPrice: entryPrice,
+          currentPrice: postEntry.currentPrice,
           simulatedSizeUsd: DEFAULT_SIZE_USD,
           positionRemaining: 1,
-          unrealizedPnl: 0,
+          unrealizedPnl: metrics.unrealizedPnl,
           realizedPnl: 0,
-          roi: 0,
+          roi: metrics.roi,
           status: "OPEN",
           entryReasoning: signal.reasoning,
           latestReasoning: signal.reasoning,
           maxFavorableExcursion: 0,
           maxAdverseExcursion: 0,
+          priceStatus: postEntry.priceStatus,
+          priceSource: postEntry.priceSource,
+          lastPriceUpdateAt: postEntry.lastPriceUpdateAt,
         },
       });
 
@@ -229,14 +250,21 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         shadow.conditionId,
         shadow.side,
       );
-      const currentPrice =
-        tape.length > 0
-          ? tape[tape.length - 1].price
-          : shadow.currentPrice;
+      const entryMs = shadow.createdAt.getTime() + shadow.entryDelayMs;
+      const snapshotPrice = await latestMarketTradePrice(shadow.marketId);
+      const priced = resolveShadowPrice({
+        entryMs,
+        entryPrice: shadow.simulatedEntryPrice,
+        side: shadow.side,
+        tape,
+        marketSnapshotPrice: snapshotPrice,
+        lastKnownPrice: shadow.currentPrice,
+        now,
+      });
 
       let state = computePositionMetrics(
         shadow.simulatedEntryPrice,
-        currentPrice,
+        priced.currentPrice,
         shadow.simulatedSizeUsd,
         shadow.positionRemaining,
         shadow.realizedPnl,
@@ -255,7 +283,7 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
       const { state: nextState, decision } = applyAuguriumExitRules(
         state,
         {
-          currentPrice,
+          currentPrice: priced.currentPrice,
           outcomeSide: shadow.side,
           signalExpired: signal.expiresAt ? signal.expiresAt < now : false,
           signalInactive: signal.status !== "active",
@@ -267,7 +295,7 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
       );
 
       const updateData = {
-        currentPrice,
+        currentPrice: priced.currentPrice,
         positionRemaining: nextState.positionRemaining,
         unrealizedPnl: nextState.unrealizedPnl,
         realizedPnl: nextState.realizedPnl,
@@ -276,6 +304,9 @@ export async function runShadowPortfolioJob(): Promise<ShadowPortfolioSummary> {
         maxAdverseExcursion: nextState.maxAdverseExcursion,
         partialExitDone: nextState.partialExitDone,
         runnerActive: nextState.runnerActive,
+        priceStatus: priced.priceStatus,
+        priceSource: priced.priceSource,
+        lastPriceUpdateAt: priced.lastPriceUpdateAt ?? shadow.lastPriceUpdateAt,
         latestReasoning: decision?.latestReasoning ?? shadow.latestReasoning,
         ...(decision
           ? {

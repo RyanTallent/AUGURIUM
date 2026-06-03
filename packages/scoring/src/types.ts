@@ -88,6 +88,9 @@ export interface TraderMetricsResult {
   specialistScore: number;
   lowConfidence: boolean;
   skipReason: string | null;
+  confidenceReason: string;
+  rankingReason: string;
+  copyabilityReason: string;
   categoryMetrics: CategoryMetricResult[];
 }
 

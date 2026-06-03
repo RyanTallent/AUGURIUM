@@ -70,21 +70,26 @@ export function computeTraderMetrics(
   const wins = trips.filter((t) => t.pnl > 0);
   const losses = trips.filter((t) => t.pnl < 0);
 
-  const copy = computeCopyability(sorted, marketTapes);
+  const copy = computeCopyability(sorted, marketTapes, {
+    tradeCount: sorted.length,
+    totalVolume,
+  });
   const informationEdgeScore = computeInformationEdgeScore(sorted, marketTapes);
   const categoryMetrics = computeCategoryMetrics(sorted, trips);
   const { category: specialistCategory, score: specialistScore } =
     pickSpecialistCategory(categoryMetrics);
 
   const consistencyScore = consistencyFromTrips(trips);
-  const confidenceScore = computeConfidenceScore({
+  const confidence = computeConfidenceScore({
     tradeCount: sorted.length,
     activeDays,
     marketCount: marketIds.size,
+    totalVolume,
     consistencyScore,
     lastSeen,
     now,
   });
+  const confidenceScore = confidence.score;
 
   const t7 = windowTrades(sorted, 7, now);
   const t30 = windowTrades(sorted, 30, now);
@@ -98,7 +103,7 @@ export function computeTraderMetrics(
   const roi180d = roiForWindow(now.getTime() - 180 * 86400000, trips, t180);
   const recentFormScore = clamp((roi30d + 0.15) / 0.35, 0, 1);
 
-  const rankingScore = computeRankingScore({
+  let rankingScore = computeRankingScore({
     estimatedCopiedRoi: copy.estimatedCopiedRoi,
     copyabilityScore: copy.copyabilityScore,
     informationEdgeScore,
@@ -106,6 +111,25 @@ export function computeTraderMetrics(
     consistencyScore,
     recentFormScore,
   });
+
+  const rankingPenalties: string[] = [];
+  if (sorted.length < 25) {
+    rankingScore = Math.min(rankingScore, 45);
+    rankingPenalties.push("sample<25 trades");
+  }
+  if (totalVolume < 500) {
+    rankingScore = Math.min(rankingScore, 40);
+    rankingPenalties.push("volume<$500");
+  }
+  if (confidenceScore < 0.35) {
+    rankingScore = Math.min(rankingScore, 50);
+    rankingPenalties.push("low confidence");
+  }
+
+  const rankingReason =
+    rankingPenalties.length > 0
+      ? `Rank ${rankingScore.toFixed(1)} capped: ${rankingPenalties.join(", ")}`
+      : `Rank ${rankingScore.toFixed(1)} from copyability-weighted ROI and form`;
 
   const lowConfidence = confidenceScore < 0.4 || sorted.length < 30;
   const tier = classifyTier({
@@ -170,6 +194,9 @@ export function computeTraderMetrics(
     specialistScore,
     lowConfidence,
     skipReason: null,
+    confidenceReason: confidence.reason,
+    rankingReason,
+    copyabilityReason: copy.reason,
     categoryMetrics,
   };
 }
@@ -219,6 +246,9 @@ function emptyResult(reason: string): TraderMetricsResult {
     specialistScore: 0,
     lowConfidence: true,
     skipReason: reason,
+    confidenceReason: reason,
+    rankingReason: reason,
+    copyabilityReason: reason,
     categoryMetrics: [],
   };
 }

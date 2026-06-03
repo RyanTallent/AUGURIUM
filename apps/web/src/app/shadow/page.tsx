@@ -86,13 +86,15 @@ function ShadowTable({
               <th>PnL</th>
               <th>MFE</th>
               <th>MAE</th>
+              <th>Price</th>
+              <th>Updated</th>
               <th>Hold better?</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className={tableStyles.empty}>
+                <td colSpan={11} className={tableStyles.empty}>
                   None — run shadow sync after signals exist
                 </td>
               </tr>
@@ -109,6 +111,12 @@ function ShadowTable({
                   <td>${(r.realizedPnl + r.unrealizedPnl).toFixed(2)}</td>
                   <td>{(r.maxFavorableExcursion * 100).toFixed(1)}%</td>
                   <td>{(r.maxAdverseExcursion * 100).toFixed(1)}%</td>
+                  <td title={r.priceSource ?? undefined}>{r.priceStatus}</td>
+                  <td>
+                    {r.lastPriceUpdateAt
+                      ? new Date(r.lastPriceUpdateAt).toLocaleString()
+                      : "—"}
+                  </td>
                   <td>{r.wouldHaveBeenBetterToHold ? "yes" : "—"}</td>
                 </tr>
               ))

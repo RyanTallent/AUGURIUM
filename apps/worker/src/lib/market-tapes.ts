@@ -31,3 +31,27 @@ export async function buildMarketTapesForKeys(
 
   return tapes;
 }
+
+/** Full ascending tape for one market outcome asset (shadow mark-to-market). */
+export async function buildMarketTapeForMarket(
+  marketId: string,
+  conditionId: string,
+  asset: string,
+): Promise<TapePoint[]> {
+  const rows = await prisma.trade.findMany({
+    where: { marketId, conditionId, asset },
+    select: { price: true, tradedAt: true },
+    orderBy: { tradedAt: "asc" },
+    take: 5000,
+  });
+  return rows.map((r) => ({ tradedAt: r.tradedAt, price: r.price }));
+}
+
+export async function latestMarketTradePrice(marketId: string): Promise<number | null> {
+  const row = await prisma.trade.findFirst({
+    where: { marketId },
+    orderBy: { tradedAt: "desc" },
+    select: { price: true },
+  });
+  return row?.price ?? null;
+}

@@ -1,7 +1,24 @@
 import { clamp } from "./math.js";
 import type { SystemConfidenceInput } from "./types.js";
 
+export interface SystemConfidenceBreakdown {
+  score: number;
+  coveragePct: number;
+  categoryPct: number;
+  shadowFreshPct: number;
+  tapePct: number;
+  ingestHealth: number;
+  scoreHealth: number;
+  summary: string;
+}
+
 export function computeSystemConfidenceScore(input: SystemConfidenceInput): number {
+  return computeSystemConfidenceBreakdown(input).score;
+}
+
+export function computeSystemConfidenceBreakdown(
+  input: SystemConfidenceInput,
+): SystemConfidenceBreakdown {
   const {
     totalTrades,
     recentTrades,
@@ -11,14 +28,19 @@ export function computeSystemConfidenceScore(input: SystemConfidenceInput): numb
     lastTradeAt,
     lastIngestSuccessAt,
     lastScoreSuccessAt,
+    categorizedMarketsPct = 0,
+    shadowPriceFreshPct = 0,
+    tapeCoveragePct = 0,
     now,
   } = input;
 
-  const coverage =
-    recentTrades > 0 ? tradesWithScoredTrader / recentTrades : 0;
-  const traderDepth = clamp(scoredTraderCount / 50, 0, 1);
+  const coverage = recentTrades > 0 ? tradesWithScoredTrader / recentTrades : 0;
+  const traderDepth = clamp(scoredTraderCount / 80, 0, 1);
   const marketBreadth = clamp(marketsWithRecentActivity / 30, 0, 1);
-  const dataVolume = clamp(totalTrades / 1000, 0, 1);
+  const dataVolume = clamp(totalTrades / 2000, 0, 1);
+  const categoryFactor = clamp(categorizedMarketsPct / 100, 0, 1);
+  const shadowFactor = clamp(shadowPriceFreshPct / 100, 0, 1);
+  const tapeFactor = clamp(tapeCoveragePct / 100, 0, 1);
 
   let freshness = 0;
   if (lastTradeAt) {
@@ -39,13 +61,38 @@ export function computeSystemConfidenceScore(input: SystemConfidenceInput): numb
   }
 
   const raw =
-    coverage * 30 +
-    traderDepth * 20 +
-    marketBreadth * 15 +
-    dataVolume * 10 +
-    freshness * 15 +
-    ingestHealth * 5 +
-    scoreHealth * 5;
+    coverage * 22 +
+    traderDepth * 14 +
+    marketBreadth * 10 +
+    dataVolume * 8 +
+    freshness * 12 +
+    ingestHealth * 6 +
+    scoreHealth * 6 +
+    categoryFactor * 8 +
+    shadowFactor * 7 +
+    tapeFactor * 7;
 
-  return clamp(raw, 0, 100);
+  const score = clamp(Math.round(raw), 0, 100);
+
+  const warnings: string[] = [];
+  if (categorizedMarketsPct < 40) warnings.push("low category coverage");
+  if (shadowPriceFreshPct < 25) warnings.push("stale shadow prices");
+  if (tapeCoveragePct < 30) warnings.push("thin price tapes");
+  if (scoredTraderCount < 50) warnings.push("low scored-trader depth");
+
+  const summary =
+    warnings.length > 0
+      ? `System ${score}/100 — ${warnings.join(", ")}`
+      : `System ${score}/100 — ingestion and evidence healthy`;
+
+  return {
+    score,
+    coveragePct: Math.round(coverage * 100),
+    categoryPct: Math.round(categorizedMarketsPct),
+    shadowFreshPct: Math.round(shadowPriceFreshPct),
+    tapePct: Math.round(tapeCoveragePct),
+    ingestHealth,
+    scoreHealth,
+    summary,
+  };
 }

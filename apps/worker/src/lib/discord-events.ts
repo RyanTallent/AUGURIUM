@@ -22,8 +22,8 @@ export async function queueDiscordEvent(input: {
   const errorMessage = config.canSend
     ? null
     : !config.enabled
-      ? "DISCORD_ENABLED is false"
-      : "DISCORD_WEBHOOK_URL missing";
+      ? "DISCORD_ENABLED is false — set DISCORD_ENABLED=true in Render Environment Group (augurium-shared)"
+      : "DISCORD_WEBHOOK_URL missing — add webhook secret to Render Environment Group (augurium-shared)";
 
   if (!config.canSend) {
     console.warn(`[discord] Skipped event ${input.dedupeKey}: ${errorMessage}`);

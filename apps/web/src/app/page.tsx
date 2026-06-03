@@ -1,5 +1,6 @@
 import { APP_NAME } from "@augurium/shared";
 import { prisma } from "@augurium/database";
+import { getProductionWarnings } from "../lib/ops-status";
 import styles from "./page.module.css";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ async function getStats() {
 }
 
 export default async function HomePage() {
-  const stats = await getStats();
+  const [stats, warnings] = await Promise.all([getStats(), getProductionWarnings()]);
 
   return (
     <main className={styles.main}>
@@ -96,6 +97,23 @@ export default async function HomePage() {
         </article>
       </section>
 
+      {warnings.messages.length > 0 && (
+        <section className={styles.modules}>
+          <h2>Production warnings</h2>
+          <ul>
+            {warnings.messages.map((m) => (
+              <li key={m} className={styles.warn}>
+                {m}
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            <a href="/reports">Discord setup</a> · <a href="/shadow">shadow prices</a> ·{" "}
+            <a href="/traders">scoring</a>
+          </p>
+        </section>
+      )}
+
       <section className={styles.modules}>
         <h2>Build phases</h2>
         <ul>
@@ -108,7 +126,17 @@ export default async function HomePage() {
             Phase C — consensus & signals (complete){" "}
             <a href="/overview">overview</a> · <a href="/signals">signals</a>
           </li>
-          <li>Phase D–G — shadow, simulation, portfolio, execution (pending)</li>
+          <li>
+            Phase D — shadow & simulation (complete) <a href="/shadow">shadow</a>
+          </li>
+          <li>Phase E — Discord alerts (complete; enable env on Render) <a href="/reports">reports</a></li>
+          <li>
+            Phase F — portfolio / risk (simulated) <a href="/portfolio">portfolio</a>
+          </li>
+          <li>
+            Phase G — execution (paper only; live Polymarket NOT_READY){" "}
+            <a href="/execution">execution</a>
+          </li>
         </ul>
       </section>
     </main>

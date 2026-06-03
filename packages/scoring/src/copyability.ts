@@ -21,12 +21,24 @@ export interface CopyabilityResult {
   averageExecutionDelayEstimate: number;
   mirrorabilityScore: number;
   copiedProfitFactor: number;
+  reason: string;
+}
+
+export interface CopyabilityContext {
+  tradeCount: number;
+  totalVolume: number;
 }
 
 export function computeCopyability(
   traderTrades: TradeInput[],
   marketTapes: Map<string, TapePoint[]>,
+  context?: CopyabilityContext,
 ): CopyabilityResult {
+  const tradeCount = context?.tradeCount ?? traderTrades.length;
+  const totalVolume =
+    context?.totalVolume ??
+    traderTrades.reduce((s, t) => s + t.size * t.price, 0);
+
   if (traderTrades.length === 0) {
     return {
       copyabilityScore: 0,
@@ -35,6 +47,7 @@ export function computeCopyability(
       averageExecutionDelayEstimate: 0,
       mirrorabilityScore: 0,
       copiedProfitFactor: 0,
+      reason: "No trades for copyability",
     };
   }
 
@@ -42,11 +55,13 @@ export function computeCopyability(
   const copiedReturns: number[] = [];
   const slippages: number[] = [];
   const mirrorFlags: number[] = [];
+  let tapeHits = 0;
 
   for (const trade of traderTrades) {
     const key = `${trade.conditionId}:${trade.asset}`;
     const tape = marketTapes.get(key);
     if (!tape?.length) continue;
+    tapeHits++;
 
     const buy = isBuySide(trade.side);
     const entry = trade.price;
@@ -73,13 +88,13 @@ export function computeCopyability(
     mirrorFlags.push(move30s >= 0 ? 1 : 0);
   }
 
-  const copyabilityScore = safeDivide(
+  let copyabilityScore = safeDivide(
     delayScores.reduce((a, b) => a + b, 0),
     delayScores.length,
     0,
   );
 
-  const estimatedCopiedRoi =
+  let estimatedCopiedRoi =
     copiedReturns.length > 0
       ? copiedReturns.reduce((a, b) => a + b, 0) / copiedReturns.length
       : 0;
@@ -88,7 +103,34 @@ export function computeCopyability(
   const losses = Math.abs(
     copiedReturns.filter((r) => r < 0).reduce((a, b) => a + b, 0),
   );
-  const copiedProfitFactor = losses === 0 ? (wins.length ? 5 : 0) : clamp(wins.reduce((a, b) => a + b, 0) / losses, 0, 10);
+  let copiedProfitFactor =
+    losses === 0 ? (wins.length ? 5 : 0) : clamp(wins.reduce((a, b) => a + b, 0) / losses, 0, 10);
+
+  const penalties: string[] = [];
+
+  if (tradeCount < 25) {
+    copyabilityScore = Math.min(copyabilityScore, 0.45);
+    estimatedCopiedRoi = Math.min(estimatedCopiedRoi, 0.08);
+    penalties.push("low trade sample");
+  }
+  if (totalVolume < 500) {
+    copyabilityScore = Math.min(copyabilityScore, 0.35);
+    estimatedCopiedRoi = Math.min(estimatedCopiedRoi, 0.05);
+    penalties.push("low volume");
+  }
+  if (tapeHits < Math.max(3, Math.floor(traderTrades.length * 0.2))) {
+    copyabilityScore = Math.min(copyabilityScore, 0.4);
+    penalties.push("sparse price tape");
+  }
+  if (delayScores.length < 5) {
+    copyabilityScore = Math.min(copyabilityScore, 0.3);
+    penalties.push("insufficient tape points");
+  }
+
+  const reason =
+    penalties.length > 0
+      ? `Copyability capped: ${penalties.join("; ")} (${tapeHits} tape hits)`
+      : `Copyability from ${delayScores.length} delay samples across ${tapeHits} markets`;
 
   return {
     copyabilityScore: clamp(copyabilityScore, 0, 1),
@@ -97,5 +139,6 @@ export function computeCopyability(
     averageExecutionDelayEstimate: 180,
     mirrorabilityScore: safeDivide(mirrorFlags.reduce((a, b) => a + b, 0), mirrorFlags.length, 0),
     copiedProfitFactor,
+    reason,
   };
 }

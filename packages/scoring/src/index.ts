@@ -7,3 +7,4 @@ export * from "./information-edge.js";
 export * from "./category.js";
 export * from "./ranking.js";
 export * from "./compute.js";
+export * from "./categories.js";

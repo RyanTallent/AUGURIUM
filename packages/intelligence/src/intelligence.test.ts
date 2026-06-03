@@ -129,6 +129,9 @@ describe("alpha", () => {
         triggerTradeIds: [],
         triggerTraderWallets: [],
         medianCopiedRoi: 0.07,
+        combinedNotional: 1200,
+        oldestTriggerTradeAt: null,
+        newestTriggerTradeAt: null,
       },
       marketQualityScore: 80,
       disagreementScore: 0.1,
@@ -149,6 +152,8 @@ describe("watchlist", () => {
         systemConfidenceScore: 55,
         hasScoredTraderActivity: true,
         insufficientData: false,
+        uniqueTraders: 4,
+        disagreementScore: 0.1,
       }),
       "TRADE_NOW",
     );
@@ -160,6 +165,8 @@ describe("watchlist", () => {
         systemConfidenceScore: 55,
         hasScoredTraderActivity: true,
         insufficientData: true,
+        uniqueTraders: 1,
+        disagreementScore: 0.5,
       }),
       "IGNORE",
     );
@@ -171,6 +178,7 @@ describe("reasoning", () => {
     const text = buildSignalReasoning({
       signalType: "WATCHLIST",
       outcomeSide: "YES",
+      category: "Politics",
       consensus: {
         outcomeSide: "YES",
         consensusScore: 78,
@@ -183,6 +191,9 @@ describe("reasoning", () => {
         triggerTradeIds: ["t1"],
         triggerTraderWallets: ["0xabc"],
         medianCopiedRoi: 0.072,
+        combinedNotional: 800,
+        oldestTriggerTradeAt: new Date("2026-06-02T10:00:00Z"),
+        newestTriggerTradeAt: new Date("2026-06-02T11:00:00Z"),
       },
       alphaScore: 74,
       marketQualityScore: 81,
@@ -190,6 +201,7 @@ describe("reasoning", () => {
       disagreementScore: 0.2,
       skipReason: null,
       windowMinutes: 120,
+      evidenceNote: null,
     });
     assert.match(text, /WATCHLIST/);
     assert.match(text, /consensus 78/);

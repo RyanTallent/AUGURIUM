@@ -65,6 +65,7 @@ describe("confidence", () => {
       tradeCount: 15,
       activeDays: 10,
       marketCount: 3,
+      totalVolume: 300,
       consistencyScore: 0.8,
       lastSeen: new Date(),
       now: new Date(),
@@ -73,12 +74,13 @@ describe("confidence", () => {
       tradeCount: 400,
       activeDays: 90,
       marketCount: 30,
+      totalVolume: 50000,
       consistencyScore: 0.7,
       lastSeen: new Date(),
       now: new Date(),
     });
-    assert.ok(high > low);
-    assert.ok(low <= 0.55);
+    assert.ok(high.score > low.score);
+    assert.ok(low.score <= 0.25);
   });
 });
 
@@ -90,11 +92,19 @@ describe("copyability", () => {
       { tradedAt: new Date("2026-01-01T00:05:00Z"), price: 0.55 },
     ];
     const tapes = new Map([["0xabc:token1", tape]]);
-    const trades: TradeInput[] = [
-      { id: "1", side: "BUY", size: 10, price: 0.4, tradedAt: new Date("2026-01-01T00:00:00Z"), ...base },
-    ];
-    const result = computeCopyability(trades, tapes);
-    assert.ok(result.copyabilityScore > 0.5);
+    const trades: TradeInput[] = Array.from({ length: 30 }, (_, i) => ({
+      id: String(i),
+      side: "BUY",
+      size: 50,
+      price: 0.4,
+      tradedAt: new Date(`2026-01-01T00:${String(i).padStart(2, "0")}:00Z`),
+      ...base,
+    }));
+    const result = computeCopyability(trades, tapes, {
+      tradeCount: trades.length,
+      totalVolume: 600,
+    });
+    assert.ok(result.copyabilityScore > 0.4);
   });
 });
 
@@ -153,13 +163,13 @@ describe("tiers", () => {
 describe("category specialists", () => {
   it("finds dominant category", () => {
     const trades: TradeInput[] = [
-      { id: "1", side: "BUY", size: 10, price: 0.5, tradedAt: new Date("2026-01-01"), ...base, category: "crypto" },
-      { id: "2", side: "SELL", size: 10, price: 0.7, tradedAt: new Date("2026-01-02"), ...base, category: "crypto" },
-      { id: "3", side: "BUY", size: 2, price: 0.4, tradedAt: new Date("2026-01-03"), ...base, category: "sports" },
+      { id: "1", side: "BUY", size: 10, price: 0.5, tradedAt: new Date("2026-01-01"), ...base, category: "Crypto" },
+      { id: "2", side: "SELL", size: 10, price: 0.7, tradedAt: new Date("2026-01-02"), ...base, category: "Crypto" },
+      { id: "3", side: "BUY", size: 2, price: 0.4, tradedAt: new Date("2026-01-03"), ...base, category: "Sports" },
     ];
     const trips = computeRealizedRoundTrips(trades);
     const cats = computeCategoryMetrics(trades, trips);
-    assert.equal(cats[0].category, "crypto");
+    assert.equal(cats[0].category, "Crypto");
     assert.ok(cats[0].tradeCount >= 2);
   });
 });

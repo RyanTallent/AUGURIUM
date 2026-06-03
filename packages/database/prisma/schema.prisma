@@ -121,6 +121,9 @@ model TraderMetricsSnapshot {
   specialistScore      Float
   lowConfidence        Boolean @default(true)
   skipReason           String?
+  confidenceReason     String?
+  rankingReason        String?
+  copyabilityReason    String?
 
   trader           Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
   categoryMetrics  TraderCategoryMetric[]
@@ -235,6 +238,7 @@ model Signal {
   id                    String    @id @default(cuid())
   marketId              String
   conditionId           String?
+  category              String?
   side                  String
   outcome               String?
   signalType            String    @default("IGNORE")
@@ -248,6 +252,10 @@ model Signal {
   disagreementScore     Float     @default(0)
   triggerTradeIds       String[]  @default([])
   triggerTraderWallets  String[]  @default([])
+  triggerNotional       Float     @default(0)
+  oldestTriggerTradeAt  DateTime?
+  newestTriggerTradeAt  DateTime?
+  evidenceWindowMinutes Int       @default(1440)
   reasoning             String    @default("")
   confidence            Float     @default(0)
   rationale             String    @default("")
@@ -292,6 +300,9 @@ model ShadowTrade {
   wouldHaveBeenBetterToHold Boolean @default(false)
   partialExitDone       Boolean   @default(false)
   runnerActive          Boolean   @default(false)
+  priceStatus           String    @default("NO_PRICE_SOURCE")
+  priceSource           String?
+  lastPriceUpdateAt     DateTime?
   createdAt             DateTime  @default(now())
   closedAt              DateTime?
   updatedAt             DateTime  @updatedAt

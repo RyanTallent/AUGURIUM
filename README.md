@@ -37,7 +37,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 See **AUGURIUM_TARGET_ARCHITECTURE.md** (locked target) and **AUGURIUM_GAP_ANALYSIS.md** (audit).
 
-**Current phase: A** — Polymarket ingestion (markets, trades, wallets, positions). Scoring, signals, and execution are intentionally disabled until later phases.
+Phases A–G are implemented. **Live trading and Polymarket real execution remain disabled** by default. See [DEPLOY.md](./DEPLOY.md) for Render Discord env vars.
 
 ## GitHub workflow (Cursor → GitHub)
 
