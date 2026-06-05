@@ -1,24 +1,39 @@
 import Link from "next/link";
+import { getLastMaintenanceRun } from "@augurium/database";
+import { SnapshotNotice } from "../../components/SnapshotNotice";
 import {
-  computeLiveTradingReadiness,
-  getLastMaintenanceRun,
-  getProductionHealthReport,
-} from "@augurium/database";
+  loadMaintenanceDiagnostics,
+  loadMaintenancePageData,
+  type PageLoadMeta,
+} from "../../lib/page-snapshots";
 import styles from "../page.module.css";
 
 export const dynamic = "force-dynamic";
 
 export default async function MaintenancePage() {
-  let readiness: Awaited<ReturnType<typeof computeLiveTradingReadiness>> | null = null;
+  let readiness = null;
+  let health = null;
+  let readinessMeta: PageLoadMeta = { source: "unavailable" };
   let lastRun: Awaited<ReturnType<typeof getLastMaintenanceRun>> = null;
-  let health: Awaited<ReturnType<typeof getProductionHealthReport>> | null = null;
+  let diag = null;
+  let snapshotAges = null;
+  let webMemory: Awaited<
+    ReturnType<typeof loadMaintenanceDiagnostics>
+  >["webMemory"] | null = null;
 
   try {
-    [readiness, lastRun, health] = await Promise.all([
-      computeLiveTradingReadiness(),
+    const [page, diagnostics, run] = await Promise.all([
+      loadMaintenancePageData(),
+      loadMaintenanceDiagnostics(),
       getLastMaintenanceRun(),
-      getProductionHealthReport(),
     ]);
+    readiness = page.readiness;
+    health = page.health;
+    readinessMeta = page.readinessMeta;
+    lastRun = run;
+    diag = diagnostics.diagnostics;
+    snapshotAges = diagnostics.snapshotAges;
+    webMemory = diagnostics.webMemory;
   } catch {
     /* DB unavailable */
   }
@@ -44,6 +59,8 @@ export default async function MaintenancePage() {
           </span>
         )}
       </header>
+
+      <SnapshotNotice meta={readinessMeta} />
 
       {needsRecovery && (
         <p className={styles.warn} style={{ marginTop: "1rem", maxWidth: "48rem" }}>
@@ -231,6 +248,61 @@ export default async function MaintenancePage() {
           </ul>
         </>
       )}
+
+      <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Web memory & snapshot diagnostics</h2>
+      <p className={styles.hint}>
+        Render web should read worker snapshots (queue <code>web:snapshot-refresh</code>, default
+        every 3m). Health check: <a href="/api/health">/api/health</a> (lightweight).
+      </p>
+      {webMemory && (
+        <ul style={{ fontSize: "0.85rem" }}>
+          <li>
+            Web process heap: {webMemory.heapUsedMb} MB / {webMemory.heapTotalMb} MB · RSS{" "}
+            {webMemory.rssMb} MB · in-flight queries: {webMemory.inFlightQueries}
+          </li>
+        </ul>
+      )}
+      {diag && (
+        <ul style={{ fontSize: "0.85rem" }}>
+          <li>Worker last refresh: {diag.refreshedAt}</li>
+          <li>
+            Worker heap at refresh: {diag.heapUsedMb ?? "—"} MB · connection limit:{" "}
+            {diag.webPrismaConnectionLimit}
+          </li>
+          {diag.steps.map((s) => (
+            <li key={s.name}>
+              {s.name}: {s.ok ? "ok" : "fail"} ({s.durationMs}ms){s.error ? ` — ${s.error}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {snapshotAges && (
+        <ul style={{ fontSize: "0.85rem" }}>
+          <li>
+            Dashboard snapshot age:{" "}
+            {snapshotAges.dashboard
+              ? `${Math.round(snapshotAges.dashboard.ageMs / 1000)}s`
+              : "none"}
+          </li>
+          <li>
+            Copy snapshot age:{" "}
+            {snapshotAges.copyTrading
+              ? `${Math.round(snapshotAges.copyTrading.ageMs / 1000)}s`
+              : "none"}
+          </li>
+          <li>
+            Readiness snapshot age:{" "}
+            {snapshotAges.readiness
+              ? `${Math.round(snapshotAges.readiness.ageMs / 1000)}s`
+              : "none"}
+          </li>
+        </ul>
+      )}
+      <p className={styles.hint} style={{ marginTop: "1rem" }}>
+        Optional ops: schedule a daily web service restart off-peak on Render if heap drifts — not
+        a substitute for snapshots. Set <code>AUGURIUM_SERVICE=web</code> and{" "}
+        <code>WEB_PRISMA_CONNECTION_LIMIT=3</code> on the web service.
+      </p>
 
       <p style={{ marginTop: "2rem", fontSize: "0.8rem" }}>
         <Link href="/readiness">Readiness</Link> · <Link href="/health">Health</Link> ·{" "}

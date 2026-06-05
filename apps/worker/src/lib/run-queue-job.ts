@@ -15,6 +15,7 @@ import { runPortfolioEngineJob } from "../jobs/run-portfolio-engine.js";
 import { runExecutionEngineJob } from "../jobs/run-execution-engine.js";
 import { runMaintenanceDailyJob } from "../jobs/run-maintenance-daily.js";
 import { runCopyPaperJob } from "../jobs/run-copy-paper.js";
+import { runWebSnapshotRefreshJob } from "../jobs/run-web-snapshot-refresh.js";
 import { processDiscordNotifications } from "../engines/discord.js";
 
 export type JobCounts = Record<string, string | number | boolean>;
@@ -124,6 +125,10 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         opened: s.opened,
         closed: s.closed,
       };
+    }
+    case QUEUES.WEB_SNAPSHOT_REFRESH: {
+      const s = await runWebSnapshotRefreshJob();
+      return { message: s.message, totalMs: s.totalMs, steps: s.steps.length };
     }
     default:
       return { skipped: true, reason: "unknown-queue" };

@@ -1,16 +1,12 @@
 import Link from "next/link";
-import { computeLiveTradingReadiness } from "@augurium/database";
+import { SnapshotNotice } from "../../components/SnapshotNotice";
+import { loadReadinessPageData } from "../../lib/page-snapshots";
 import styles from "../page.module.css";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReadinessPage() {
-  let report: Awaited<ReturnType<typeof computeLiveTradingReadiness>> | null = null;
-  try {
-    report = await computeLiveTradingReadiness();
-  } catch {
-    report = null;
-  }
+  const { report, meta } = await loadReadinessPageData();
 
   return (
     <main className={styles.main}>
@@ -28,6 +24,8 @@ export default async function ReadinessPage() {
         )}
       </header>
 
+      <SnapshotNotice meta={meta} />
+
       {!report ? (
         <p className={styles.warn}>Unable to load readiness.</p>
       ) : (
@@ -40,93 +38,23 @@ export default async function ReadinessPage() {
               </strong>
             </div>
             <div className={styles.card}>
-              <span className={styles.kicker}>Payout audit</span>
-              <strong className={report.shadowPayoutAuditPass ? styles.ok : styles.warn}>
-                {report.shadowPayoutAuditPass ? "PASS" : "FAIL"}
-              </strong>
-            </div>
-            <div className={styles.card}>
               <span className={styles.kicker}>Impossible PnL</span>
               <strong className={report.impossiblePnlCount === 0 ? styles.ok : styles.warn}>
                 {report.impossiblePnlCount}
               </strong>
             </div>
             <div className={styles.card}>
-              <span className={styles.kicker}>Invalid rows</span>
-              <strong>{report.invalidForAnalyticsCount}</strong>
-            </div>
-            <div className={styles.card}>
               <span className={styles.kicker}>Paper</span>
               <strong>{report.paperProgressLabel}</strong>
             </div>
-            <div className={styles.card}>
-              <span className={styles.kicker}>Cleaned avg ROI</span>
-              <strong>{(report.cleanedAverageRoi * 100).toFixed(1)}%</strong>
-            </div>
-            <div className={styles.card}>
-              <span className={styles.kicker}>Median ROI</span>
-              <strong>{(report.medianRoi * 100).toFixed(1)}%</strong>
-            </div>
-            <div className={styles.card}>
-              <span className={styles.kicker}>Duplicate groups</span>
-              <strong
-                className={report.duplicateActiveGroups === 0 ? styles.ok : styles.warn}
-              >
-                {report.duplicateActiveGroups}
-              </strong>
-            </div>
           </section>
 
-          <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Zero ROI breakdown</h2>
+          <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Blockers</h2>
           <ul>
-            {Object.entries(report.zeroRoiBreakdown)
-              .filter(([, n]) => n > 0)
-              .map(([cat, n]) => (
-                <li key={cat}>
-                  {cat}: {n}
-                </li>
-              ))}
-          </ul>
-
-          {report.blockerDetails.length > 0 && (
-            <>
-              <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Blockers</h2>
-              <ul style={{ fontSize: "0.9rem" }}>
-                {report.blockerDetails.map((b) => (
-                  <li key={b.id} style={{ marginBottom: "0.75rem" }} className={styles.warn}>
-                    <strong>{b.message}</strong>
-                    <br />
-                    {b.whyItMatters}
-                    {b.repairCommand && (
-                      <>
-                        <br />
-                        Action: <code>{b.repairCommand}</code>
-                        {b.blocksLiveTrading ? " · blocks live trading" : ""}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Sections</h2>
-          <div className={styles.grid}>
-            {report.sections.map((s) => (
-              <div key={s.name} className={styles.card}>
-                <span className={styles.kicker}>{s.name}</span>
-                <strong className={s.grade === "PASS" ? styles.ok : styles.warn}>
-                  {s.grade}
-                </strong>
-                <p style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>{s.summary}</p>
-              </div>
+            {report.blockers.map((b) => (
+              <li key={b}>{b}</li>
             ))}
-          </div>
-
-          <p style={{ marginTop: "2rem", fontSize: "0.8rem" }}>
-            <Link href="/shadow/payout-audit">Payout audit</Link> ·{" "}
-            <Link href="/shadow/analytics">Analytics</Link>
-          </p>
+          </ul>
         </>
       )}
     </main>

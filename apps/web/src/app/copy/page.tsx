@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { computeCopyBoard } from "@augurium/copy-trading";
-import { computeCopyTradingReadiness } from "@augurium/copy-trading";
+import { SnapshotNotice } from "../../components/SnapshotNotice";
+import { loadCopyBoardPageData } from "../../lib/page-snapshots";
 import styles from "../page.module.css";
 
 export const dynamic = "force-dynamic";
@@ -14,14 +14,7 @@ function shortWallet(a: string) {
 }
 
 export default async function CopyDashboardPage() {
-  let board: Awaited<ReturnType<typeof computeCopyBoard>> | null = null;
-  let readiness: Awaited<ReturnType<typeof computeCopyTradingReadiness>> | null = null;
-  try {
-    [board, readiness] = await Promise.all([computeCopyBoard(60), computeCopyTradingReadiness()]);
-  } catch {
-    board = null;
-    readiness = null;
-  }
+  const { board, readiness, meta } = await loadCopyBoardPageData();
 
   return (
     <main className={styles.main}>
@@ -31,9 +24,6 @@ export default async function CopyDashboardPage() {
             <Link href="/">AUGURIUM</Link> / Copy trading
           </p>
           <h1>Who should AUGURIUM copy today?</h1>
-          <p className={styles.hint}>
-            Ranked by expected copyability — not raw ROI. Live trading remains OFF.
-          </p>
         </div>
         {readiness && (
           <span className={readiness.paperTradingReady ? styles.ok : styles.warn}>
@@ -41,6 +31,8 @@ export default async function CopyDashboardPage() {
           </span>
         )}
       </header>
+
+      <SnapshotNotice meta={meta} />
 
       {!board ? (
         <p className={styles.warn}>Unable to load copy board.</p>
@@ -59,51 +51,10 @@ export default async function CopyDashboardPage() {
               <h2>Deteriorating</h2>
               <p className={styles.metric}>{board.deteriorating.length}</p>
             </article>
-            <article className={styles.card}>
-              <h2>Mirror positions</h2>
-              <p className={styles.metric}>{board.copyPositionsToday.length}</p>
-            </article>
           </section>
 
           <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Top traders to copy today</h2>
           <CopyTable rows={board.topTradersToday} />
-
-          {board.improving.length > 0 && (
-            <>
-              <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Improving</h2>
-              <CopyTable rows={board.improving} />
-            </>
-          )}
-
-          {board.deteriorating.length > 0 && (
-            <>
-              <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>Deteriorating (avoid)</h2>
-              <CopyTable rows={board.deteriorating} />
-            </>
-          )}
-
-          {board.copyPositionsToday.length > 0 && (
-            <>
-              <h2 style={{ fontSize: "1rem", marginTop: "2rem" }}>
-                Positions AUGURIUM would copy today
-              </h2>
-              <ul>
-                {board.copyPositionsToday.map((p) => (
-                  <li key={`${p.traderAddress}-${p.marketTitle}`}>
-                    <Link href={`/traders/${p.traderAddress}`}>{shortWallet(p.traderAddress)}</Link>
-                    {" — "}
-                    {p.marketTitle} ({p.side}) size {p.size.toFixed(2)} @ {p.avgPrice.toFixed(3)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <p className={styles.hint} style={{ marginTop: "2rem" }}>
-            <Link href="/copy-portfolios">Copy portfolio strategies</Link> ·{" "}
-            <Link href="/readiness">Readiness</Link> ·{" "}
-            <Link href="/maintenance">Maintenance</Link>
-          </p>
         </>
       )}
     </main>
@@ -125,8 +76,6 @@ function CopyTable({
     suggestedUsdAt100: number;
     suggestedUsdAt1k: number;
     suggestedUsdAt10k: number;
-    strengths: string[];
-    weaknesses: string[];
   }>;
 }) {
   if (rows.length === 0) {
@@ -143,10 +92,6 @@ function CopyTable({
             <th>Risk</th>
             <th>EV</th>
             <th>DD</th>
-            <th>Conf</th>
-            <th>Spec</th>
-            <th>$100</th>
-            <th>$1k</th>
             <th>$10k</th>
           </tr>
         </thead>
@@ -161,21 +106,11 @@ function CopyTable({
               <td>{r.riskScore}</td>
               <td>{r.expectedValue.toFixed(3)}</td>
               <td>{fmtPct(r.maxDrawdown)}</td>
-              <td>{fmtPct(r.confidence)}</td>
-              <td>{r.specialization ?? "—"}</td>
-              <td>${r.suggestedUsdAt100}</td>
-              <td>${r.suggestedUsdAt1k}</td>
               <td>${r.suggestedUsdAt10k}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {rows[0] && (
-        <p className={styles.hint} style={{ marginTop: "0.5rem" }}>
-          {rows[0].strengths.join(" · ")}
-          {rows[0].weaknesses.length ? ` — watch: ${rows[0].weaknesses.join(", ")}` : ""}
-        </p>
-      )}
     </div>
   );
 }

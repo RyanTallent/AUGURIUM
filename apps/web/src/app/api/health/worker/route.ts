@@ -2,23 +2,23 @@ import { NextResponse } from "next/server";
 import {
   getLastMaintenanceRun,
   getLastWorkerMemoryFromRuns,
-  getProductionHealthReport,
+  getWebDiagnosticsSnapshot,
 } from "@augurium/database";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [health, lastMaintenance, workerMem] = await Promise.all([
-      getProductionHealthReport(),
+    const [diag, lastMaintenance, workerMem] = await Promise.all([
+      getWebDiagnosticsSnapshot(),
       getLastMaintenanceRun(),
       getLastWorkerMemoryFromRuns(),
     ]);
 
     return NextResponse.json({
       workerMemory: workerMem,
-      workerMemoryHigh: health.workerMemoryHigh,
-      ingestionFailedRuns24h: health.ingestionFailedRuns24h,
+      workerMemoryHigh: workerMem?.highWatermark ?? false,
+      snapshotRefresh: diag?.data ?? null,
       lastMaintenance: lastMaintenance
         ? {
             id: lastMaintenance.id,

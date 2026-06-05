@@ -122,3 +122,26 @@ export {
   type ShadowTrustRepairResult,
   type ShadowTrustRepairReport,
 } from "./shadow-trust-repair.js";
+export {
+  SNAPSHOT_STALE_MS,
+  getDashboardMetricsSnapshot,
+  getCopyTradingSnapshot,
+  getReadinessSnapshot,
+  getShadowAnalyticsSnapshot,
+  getWebDiagnosticsSnapshot,
+  getSnapshotAgeSummary,
+  type SnapshotMeta,
+  type SnapshotRow,
+  type SnapshotAgeSummary,
+} from "./web-snapshots.js";
+export {
+  refreshCoreWebSnapshots,
+  upsertCopyTradingSnapshot,
+  upsertDashboardSnapshot,
+  buildDashboardSnapshotPayload,
+  upsertWebDiagnostics,
+  type WebSnapshotRefreshResult,
+  type WebDiagnosticsPayload,
+  type DashboardSnapshotPayload,
+  type WebSnapshotRefreshStep,
+} from "./refresh-web-snapshots.js";

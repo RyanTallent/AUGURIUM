@@ -51,6 +51,8 @@ envVarGroups:
         value: "false"
       - key: PAPER_COPY_ENABLED
         value: "false"
+      - key: WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS
+        value: "180000"
       - key: DISCORD_ENABLED
         sync: false
       - key: DISCORD_WEBHOOK_URL
@@ -87,7 +89,7 @@ services:
       npm run build --workspace=@augurium/web
     preDeployCommand: npm run db:push
     startCommand: npm run start --workspace=@augurium/web
-    healthCheckPath: /
+    healthCheckPath: /api/health
     autoDeploy: true
     buildFilter:
       paths:
@@ -101,6 +103,16 @@ services:
         - "**/*.md"
     envVars:
       - fromGroup: augurium-shared
+      - key: AUGURIUM_SERVICE
+        value: web
+      - key: WEB_PRISMA_CONNECTION_LIMIT
+        value: "3"
+      - key: WEB_MAX_CONCURRENT_QUERIES
+        value: "2"
+      - key: WEB_SNAPSHOT_STALE_MS
+        value: "600000"
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=460"
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db

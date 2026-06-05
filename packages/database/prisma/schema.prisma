@@ -699,3 +699,48 @@ model CopyPaperPosition {
   @@index([traderId, status])
   @@index([marketId])
 }
+
+/// Precomputed dashboard payloads (worker refresh; web reads first)
+model DashboardMetricsSnapshot {
+  id         String   @id @default("current")
+  payload    Json
+  capturedAt DateTime @default(now())
+  refreshMs  Int?
+  source     String   @default("worker")
+  error      String?
+  updatedAt  DateTime @updatedAt
+}
+
+model CopyTradingSnapshot {
+  id         String   @id @default("current")
+  payload    Json
+  capturedAt DateTime @default(now())
+  refreshMs  Int?
+  error      String?
+  updatedAt  DateTime @updatedAt
+}
+
+model ReadinessSnapshot {
+  id         String   @id @default("current")
+  payload    Json
+  capturedAt DateTime @default(now())
+  refreshMs  Int?
+  error      String?
+  updatedAt  DateTime @updatedAt
+}
+
+model ShadowAnalyticsSnapshot {
+  id         String   @id @default("current")
+  payload    Json
+  capturedAt DateTime @default(now())
+  refreshMs  Int?
+  error      String?
+  updatedAt  DateTime @updatedAt
+}
+
+model WebDiagnosticsSnapshot {
+  id         String   @id @default("current")
+  payload    Json
+  capturedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

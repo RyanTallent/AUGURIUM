@@ -35,6 +35,30 @@ Optional tuning:
 
 After changing env vars, **redeploy the worker** (and web if dashboard Discord status should reflect new values).
 
+## Web memory & database pool (Render Starter 512MB)
+
+The dashboard reads **precomputed snapshots** refreshed by the worker (`web:snapshot-refresh`, default every 3 minutes). Do not rely on the web process running full analytics on each page load.
+
+**Web service only:**
+
+| Variable | Recommended | Purpose |
+|----------|-------------|---------|
+| `AUGURIUM_SERVICE` | `web` | Enables low Prisma `connection_limit` |
+| `WEB_PRISMA_CONNECTION_LIMIT` | `3` | Avoid pool timeout (was 9 on Starter) |
+| `WEB_MAX_CONCURRENT_QUERIES` | `2` | Limits parallel heavy fallbacks |
+| `WEB_SNAPSHOT_STALE_MS` | `600000` | Treat snapshots older than 10m as stale |
+| `NODE_OPTIONS` | `--max-old-space-size=460` | Headroom under 512MB plan |
+
+**Worker:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS` | `180000` | Snapshot refresh interval (1–5 min) |
+
+Health check URL: `/api/health` (ping + snapshot ages only).
+
+Optional: schedule a **daily web restart** off-peak in Render if heap still drifts — this is a safety valve, not the primary fix.
+
 ## Post-deploy maintenance
 
 ```bash

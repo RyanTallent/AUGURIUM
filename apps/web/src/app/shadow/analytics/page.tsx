@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { computeShadowAnalytics } from "@augurium/database";
+import { SnapshotNotice } from "../../../components/SnapshotNotice";
+import { loadShadowAnalyticsPageData } from "../../../lib/page-snapshots";
 import styles from "../../page.module.css";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +10,7 @@ function pct(n: number) {
 }
 
 export default async function ShadowAnalyticsPage() {
-  let report: Awaited<ReturnType<typeof computeShadowAnalytics>> | null = null;
-  try {
-    report = await computeShadowAnalytics();
-  } catch {
-    report = null;
-  }
+  const { report, meta } = await loadShadowAnalyticsPageData();
 
   return (
     <main className={styles.main}>
@@ -24,9 +20,6 @@ export default async function ShadowAnalyticsPage() {
             <Link href="/shadow">Shadow</Link> / Analytics
           </p>
           <h1>Shadow portfolio analytics</h1>
-          <p className={styles.hint}>
-            Cleaned metrics exclude invalid_for_analytics and share-based payout outliers
-          </p>
         </div>
         {report && (
           <span className={report.analyticsTrustworthy ? styles.ok : styles.warn}>
@@ -35,59 +28,26 @@ export default async function ShadowAnalyticsPage() {
         )}
       </header>
 
+      <SnapshotNotice meta={meta} />
+
       {!report ? (
         <p className={styles.warn}>Unable to load analytics.</p>
       ) : (
-        <>
-          <section className={styles.grid}>
-            <Metric label="Trustworthy sample" value={String(report.trustworthySampleCount)} />
-            <Metric label="Invalid excluded" value={String(report.invalidExcludedCount)} warn />
-            <Metric label="Win rate" value={pct(report.winRate)} />
-            <Metric label="Loss rate" value={pct(report.lossRate)} />
-            <Metric label="Breakeven" value={pct(report.breakevenRate)} />
-            <Metric label="Cleaned avg ROI" value={pct(report.averageRoi)} />
-            <Metric label="Raw avg ROI (diag)" value={pct(report.averageRoiRaw)} warn />
-            <Metric label="Median ROI" value={pct(report.medianRoi)} />
-            <Metric label="Profit factor" value={report.profitFactor.toFixed(2)} />
-            <Metric label="ROI anomalies" value={String(report.corruptRoiCount)} warn />
-            <Metric label="Payout audit" value={report.payoutAuditPass ? "PASS" : "FAIL"} />
-            <Metric label="Zero ROI" value={pct(report.zeroRoiClosedPct)} warn />
-          </section>
-
-          <h2 style={{ marginTop: "2rem", fontSize: "1rem" }}>Zero ROI breakdown</h2>
-          <ul>
-            {Object.entries(report.zeroRoiBreakdown.byCategory)
-              .filter(([, n]) => n > 0)
-              .map(([cat, n]) => (
-                <li key={cat}>
-                  {cat}: {n}
-                </li>
-              ))}
-          </ul>
-
-          <p style={{ marginTop: "1.5rem" }}>
-            <Link href="/shadow/payout-audit">Payout audit →</Link> ·{" "}
-            <Link href="/shadow/anomalies">Anomalies →</Link>
-          </p>
-        </>
+        <section className={styles.grid}>
+          <div className={styles.card}>
+            <span className={styles.kicker}>Win rate</span>
+            <strong>{pct(report.winRate)}</strong>
+          </div>
+          <div className={styles.card}>
+            <span className={styles.kicker}>Cleaned avg ROI</span>
+            <strong>{pct(report.averageRoi)}</strong>
+          </div>
+          <div className={styles.card}>
+            <span className={styles.kicker}>Invalid excluded</span>
+            <strong>{report.invalidExcludedCount}</strong>
+          </div>
+        </section>
       )}
     </main>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  warn,
-}: {
-  label: string;
-  value: string;
-  warn?: boolean;
-}) {
-  return (
-    <div className={styles.card}>
-      <span className={styles.kicker}>{label}</span>
-      <strong className={warn ? styles.warn : styles.ok}>{value}</strong>
-    </div>
   );
 }
