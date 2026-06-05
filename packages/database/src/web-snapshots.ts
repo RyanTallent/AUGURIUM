@@ -92,26 +92,16 @@ export async function getSnapshotAgeSummary(): Promise<SnapshotAgeSummary> {
   ): SnapshotMeta | null =>
     row ? metaFrom(row.capturedAt, row.refreshMs ?? null, row.error ?? null) : null;
 
-  const d = await prisma.dashboardMetricsSnapshot.findUnique({
-    where: { id: "current" },
-    select,
-  });
-  const c = await prisma.copyTradingSnapshot.findUnique({
-    where: { id: "current" },
-    select,
-  });
-  const r = await prisma.readinessSnapshot.findUnique({
-    where: { id: "current" },
-    select,
-  });
-  const s = await prisma.shadowAnalyticsSnapshot.findUnique({
-    where: { id: "current" },
-    select,
-  });
-  const w = await prisma.webDiagnosticsSnapshot.findUnique({
-    where: { id: "current" },
-    select: { capturedAt: true },
-  });
+  const [d, c, r, s, w] = await Promise.all([
+    prisma.dashboardMetricsSnapshot.findUnique({ where: { id: "current" }, select }),
+    prisma.copyTradingSnapshot.findUnique({ where: { id: "current" }, select }),
+    prisma.readinessSnapshot.findUnique({ where: { id: "current" }, select }),
+    prisma.shadowAnalyticsSnapshot.findUnique({ where: { id: "current" }, select }),
+    prisma.webDiagnosticsSnapshot.findUnique({
+      where: { id: "current" },
+      select: { capturedAt: true },
+    }),
+  ]);
 
   return {
     dashboard: map(d),

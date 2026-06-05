@@ -44,7 +44,8 @@ The dashboard reads **precomputed snapshots** refreshed by the worker (`web:snap
 | Variable | Recommended | Purpose |
 |----------|-------------|---------|
 | `AUGURIUM_SERVICE` | `web` | Enables low Prisma `connection_limit` |
-| `WEB_PRISMA_CONNECTION_LIMIT` | `3` | Avoid pool timeout (was 9 on Starter) |
+| `WEB_PRISMA_CONNECTION_LIMIT` | `5` | Web Prisma pool cap (avoid exhausting Postgres) |
+| `WEB_HEALTH_DB_TIMEOUT_MS` | `20000` | `/api/health/deep` DB timeout |
 | `WEB_MAX_CONCURRENT_QUERIES` | `2` | Limits parallel heavy fallbacks |
 | `WEB_SNAPSHOT_STALE_MS` | `600000` | Treat snapshots older than 10m as stale |
 | `NODE_OPTIONS` | `--max-old-space-size=460` | Headroom under 512MB plan |
@@ -54,6 +55,8 @@ The dashboard reads **precomputed snapshots** refreshed by the worker (`web:snap
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS` | `180000` | Snapshot refresh interval (1–5 min) |
+| `AUGURIUM_SERVICE` | `worker` | Enables worker Prisma `connection_limit` |
+| `WORKER_PRISMA_CONNECTION_LIMIT` | `8` | Worker pool cap (web + worker share one Postgres) |
 
 Health check URL: `/api/health` (instant 200, no database — required for Render deploy liveness). Deep diagnostics: `/api/health/deep`.
 

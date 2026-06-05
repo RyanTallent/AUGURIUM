@@ -105,7 +105,9 @@ services:
       - key: AUGURIUM_SERVICE
         value: web
       - key: WEB_PRISMA_CONNECTION_LIMIT
-        value: "3"
+        value: "5"
+      - key: WEB_HEALTH_DB_TIMEOUT_MS
+        value: "20000"
       - key: WEB_MAX_CONCURRENT_QUERIES
         value: "2"
       - key: WEB_SNAPSHOT_STALE_MS
@@ -148,6 +150,10 @@ services:
         - "**/*.md"
     envVars:
       - fromGroup: augurium-shared
+      - key: AUGURIUM_SERVICE
+        value: worker
+      - key: WORKER_PRISMA_CONNECTION_LIMIT
+        value: "8"
       - key: COPY_AUTO_PIPELINE_ENABLED
         value: "true"
       - key: PAPER_COPY_ENABLED
