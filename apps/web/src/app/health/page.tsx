@@ -35,7 +35,8 @@ export default async function ProductionHealthPage() {
           </p>
           <h1>Production health</h1>
           <p className={styles.hint}>
-            From worker snapshot · <a href="/api/health">/api/health</a> (ping only)
+            From worker snapshot · Liveness{" "}
+            <a href="/api/health">/api/health</a> · Deep <a href="/api/health/deep">/api/health/deep</a>
           </p>
         </div>
         <span

@@ -147,6 +147,40 @@ export function buildPortfolioEmbed(input: {
   });
 }
 
+export function buildCopyBoardChangeEmbed(input: {
+  added: string[];
+  removed: string[];
+  currentTop: Array<{ address: string; copyScore: number }>;
+  dashboardUrl: string;
+}): DiscordEventPayload {
+  const fmt = (w: string) => `\`${w.slice(0, 6)}…${w.slice(-4)}\``;
+  return payload({
+    title: "📋 COPY list changed",
+    description: "Top efficiency COPY targets updated.",
+    color: COLORS.trader,
+    fields: [
+      {
+        name: "Added",
+        value: input.added.length ? input.added.map(fmt).join(", ") : "—",
+      },
+      {
+        name: "Removed",
+        value: input.removed.length ? input.removed.map(fmt).join(", ") : "—",
+      },
+      {
+        name: "Current top",
+        value:
+          input.currentTop.length > 0
+            ? input.currentTop
+                .map((t, i) => `${i + 1}. ${fmt(t.address)} (${t.copyScore.toFixed(0)})`)
+                .join("\n")
+            : "—",
+      },
+      { name: "Dashboard", value: `${input.dashboardUrl}/copy` },
+    ],
+  });
+}
+
 export function buildWeeklyReportEmbed(input: {
   weekLabel: string;
   sections: { name: string; value: string }[];

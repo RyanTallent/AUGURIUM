@@ -15,6 +15,7 @@ import { runPortfolioEngineJob } from "../jobs/run-portfolio-engine.js";
 import { runExecutionEngineJob } from "../jobs/run-execution-engine.js";
 import { runMaintenanceDailyJob } from "../jobs/run-maintenance-daily.js";
 import { runCopyPaperJob } from "../jobs/run-copy-paper.js";
+import { runCopyAutoPipelineJob } from "../jobs/run-copy-auto-pipeline.js";
 import { runWebSnapshotRefreshJob } from "../jobs/run-web-snapshot-refresh.js";
 import { processDiscordNotifications } from "../engines/discord.js";
 
@@ -124,6 +125,20 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         copyEnabled: s.copyEnabled,
         opened: s.opened,
         closed: s.closed,
+      };
+    }
+    case QUEUES.COPY_AUTO_PIPELINE: {
+      const s = await runCopyAutoPipelineJob();
+      return {
+        enabled: s.enabled,
+        tradesIngested: s.tradesIngested,
+        walletActivity: s.walletActivityIngested,
+        tradersScored: s.tradersScored,
+        copyEnabled: s.paperCopyEnabled,
+        opened: s.paperOpened,
+        closed: s.paperClosed,
+        liveReady: s.liveReady,
+        durationMs: s.durationMs,
       };
     }
     case QUEUES.WEB_SNAPSHOT_REFRESH: {

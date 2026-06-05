@@ -14,7 +14,11 @@ import {
   computeAcceptanceForensics,
   computeCopyBoard,
   computeCopyTradingReadiness,
+  computeLiveCopyReadiness,
+  computeCopyMirrorAnalytics,
+  evaluateCopyWeeklyStopLoss,
 } from "@augurium/copy-trading";
+import { enqueueCopyBoardChangeDiscord } from "../lib/enqueue-copy-board-discord.js";
 
 export interface WebSnapshotRefreshSummary {
   steps: WebSnapshotRefreshStep[];
@@ -32,8 +36,22 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
     const board = await computeCopyBoard(60);
     const acceptance = await computeAcceptanceForensics();
     const copyReadiness = await computeCopyTradingReadiness();
+    const liveCopyReadiness = await computeLiveCopyReadiness();
+    const mirrorAnalytics = await computeCopyMirrorAnalytics();
+    const weeklyRisk = await evaluateCopyWeeklyStopLoss();
+    const lastTopCopyAddresses = board.topTradersToday.slice(0, 5).map((t) => t.address);
+    await enqueueCopyBoardChangeDiscord(board);
     await upsertCopyTradingSnapshot(
-      { board, acceptance, copyReadiness, generatedAt: new Date().toISOString() },
+      {
+        board,
+        acceptance,
+        copyReadiness,
+        liveCopyReadiness,
+        mirrorAnalytics,
+        weeklyRisk,
+        lastTopCopyAddresses,
+        generatedAt: new Date().toISOString(),
+      },
       Date.now() - copyStarted,
     );
     steps.push({ name: "copy_trading", ok: true, durationMs: Date.now() - copyStarted });

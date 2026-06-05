@@ -3,6 +3,7 @@ import { buildTraderTruth } from "./trader-truth.js";
 import { decideCopyTrader, rankCopyDecisions, type CopyDecision } from "./copy-decision.js";
 import { applyRiskToDecision } from "./copy-risk.js";
 import { simulateCopyPortfolios, type CopyPortfolioStrategyResult } from "./copy-portfolio.js";
+import { sortCopyTargetsByEfficiency } from "./copy-efficiency.js";
 import type { TraderTruthMetrics } from "./trader-truth.js";
 
 export interface CopyBoardReport {
@@ -57,8 +58,10 @@ export async function computeCopyBoard(limit = 50): Promise<CopyBoardReport> {
     take: 40,
   });
 
+  const byEfficiency = sortCopyTargetsByEfficiency(ranked);
+
   return {
-    topTradersToday: decisions.filter((d) => d.recommendation === "COPY").slice(0, 15),
+    topTradersToday: byEfficiency.slice(0, 15).map((r) => r.decision),
     improving: decisions.filter((d) => byAddr.get(d.address)?.truth.formTrend === "improving").slice(0, 10),
     deteriorating: decisions
       .filter((d) => byAddr.get(d.address)?.truth.formTrend === "deteriorating")

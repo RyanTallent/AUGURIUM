@@ -14,6 +14,7 @@
     "build:packages": "npm run build:database && npm run build --workspace=@augurium/shared && npm run build --workspace=@augurium/scoring && npm run build --workspace=@augurium/intelligence && npm run build --workspace=@augurium/discord && npm run build --workspace=@augurium/shadow && npm run build --workspace=@augurium/portfolio && npm run build --workspace=@augurium/execution && npm run build --workspace=@augurium/copy-trading",
     "test:copy-trading": "npm run build --workspace=@augurium/copy-trading && npm run test --workspace=@augurium/copy-trading",
     "copy:paper-sync": "npx tsx scripts/run-copy-paper.mjs",
+    "copy:auto-pipeline": "npx tsx scripts/run-copy-auto-pipeline.mjs",
     "web:snapshot-refresh": "npx tsx scripts/run-web-snapshot-refresh.mjs",
     "report:copy-readiness": "npm run build --workspace=@augurium/copy-trading && node scripts/generate-copy-trading-readiness.mjs",
     "build:worker": "npm run build:packages && npm run build --workspace=@augurium/worker",

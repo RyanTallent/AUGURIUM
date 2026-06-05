@@ -84,10 +84,9 @@ services:
     buildCommand: >-
       npm ci --include=dev &&
       npm run db:generate &&
-      npm run build --workspace=@augurium/shared &&
-      npm run build:database &&
+      npm run build:packages &&
       npm run build --workspace=@augurium/web
-    preDeployCommand: npm run db:push
+    preDeployCommand: npm run db:push --workspace=@augurium/database
     startCommand: npm run start --workspace=@augurium/web
     healthCheckPath: /api/health
     autoDeploy: true
@@ -112,7 +111,7 @@ services:
       - key: WEB_SNAPSHOT_STALE_MS
         value: "600000"
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=460"
+        value: "--max-old-space-size=384"
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db
@@ -149,6 +148,20 @@ services:
         - "**/*.md"
     envVars:
       - fromGroup: augurium-shared
+      - key: COPY_AUTO_PIPELINE_ENABLED
+        value: "true"
+      - key: PAPER_COPY_ENABLED
+        value: "true"
+      - key: WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS
+        value: "540000"
+      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
+        value: "true"
+      - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
+        value: "8"
+      - key: LIVE_COPY_ENABLED
+        value: "false"
+      - key: COPY_WEEKLY_MAX_LOSS_PCT
+        value: "0.2"
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db

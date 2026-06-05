@@ -18,7 +18,8 @@
     "test": "npx tsx --test src/copy-decision.test.ts src/copy-risk.test.ts"
   },
   "dependencies": {
-    "@augurium/database": "*"
+    "@augurium/database": "*",
+    "@augurium/execution": "*"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

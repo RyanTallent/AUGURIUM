@@ -1,4 +1,9 @@
 import { getExecutionConfig, isLivePolymarketEnabled } from "./config.js";
+
+function clobReadyFlag(): boolean {
+  const v = process.env.POLYMARKET_CLOB_READY;
+  return v === "true" || v === "1" || v === "yes";
+}
 import { safeLogMessage } from "./redact.js";
 import type {
   CredentialValidation,
@@ -24,13 +29,16 @@ export class PolymarketExecutionProvider implements ExecutionProvider {
     const cred = await this.validateCredentials();
     const cfg = getExecutionConfig();
     const live = isLivePolymarketEnabled(cfg);
+    const clobReady = clobReadyFlag();
     return {
-      ok: cred.valid && live,
-      ready: false,
+      ok: cred.valid && live && clobReady,
+      ready: clobReady,
       provider: "polymarket",
       message: cred.valid
         ? live
-          ? NOT_READY_MSG
+          ? clobReady
+            ? "Live gates on — CLOB ready flag set"
+            : NOT_READY_MSG
           : "Credentials present but live trading gates are off"
         : cred.message,
     };

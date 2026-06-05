@@ -25,6 +25,8 @@ export interface TraderTruthMetrics {
   traderExpectedValue: number;
   traderRiskScore: number;
   traderCopyScore: number;
+  mirrorabilityScore: number;
+  avgCopyDelayMs: number;
 }
 
 function clamp01(n: number): number {
@@ -137,5 +139,7 @@ export function buildTraderTruth(
     traderExpectedValue,
     traderRiskScore,
     traderCopyScore,
+    mirrorabilityScore: snap?.mirrorabilityScore ?? copyability,
+    avgCopyDelayMs: Math.round((snap?.averageExecutionDelayEstimate ?? 60) * 1000),
   };
 }

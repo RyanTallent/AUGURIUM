@@ -92,32 +92,64 @@ export function buildExposureSnapshot(
   return { traderExposure, categoryExposure, marketExposure, concentrationWarnings: warnings };
 }
 
-export function applyRiskToDecision(
+/** Downgrade COPY when recent form collapsed (copy decay). */
+export function applyCopyDecay(
   decision: CopyDecision,
   truth: TraderTruthMetrics,
 ): CopyDecision {
-  const dd = evaluateTraderDrawdownDisable(truth);
-  if (dd.disabled && decision.recommendation === "COPY") {
+  if (decision.recommendation !== "COPY") return decision;
+  if (truth.roi7d < -0.12) {
     return {
       ...decision,
       recommendation: "AVOID",
-      weaknesses: [...decision.weaknesses, dd.reason ?? "risk disable"],
+      weaknesses: [...decision.weaknesses, "copy decay: 7d ROI below -12%"],
       suggestedAllocationPct: 0,
       suggestedUsdAt10k: 0,
       suggestedUsdAt1k: 0,
       suggestedUsdAt100: 0,
     };
   }
-  const capped = capAllocationPct(decision.suggestedAllocationPct);
-  if (capped < decision.suggestedAllocationPct) {
+  if (truth.formTrend === "deteriorating" && truth.roi7d < -0.05) {
     return {
       ...decision,
+      recommendation: "WATCH",
+      weaknesses: [...decision.weaknesses, "copy decay: deteriorating + weak 7d ROI"],
+      suggestedAllocationPct: decision.suggestedAllocationPct * 0.5,
+      suggestedUsdAt10k: Math.round(decision.suggestedUsdAt10k * 0.5),
+      suggestedUsdAt1k: Math.round(decision.suggestedUsdAt1k * 0.5),
+      suggestedUsdAt100: Math.round(decision.suggestedUsdAt100 * 0.5),
+    };
+  }
+  return decision;
+}
+
+export function applyRiskToDecision(
+  decision: CopyDecision,
+  truth: TraderTruthMetrics,
+): CopyDecision {
+  let next = applyCopyDecay(decision, truth);
+  const dd = evaluateTraderDrawdownDisable(truth);
+  if (dd.disabled && next.recommendation === "COPY") {
+    return {
+      ...next,
+      recommendation: "AVOID",
+      weaknesses: [...next.weaknesses, dd.reason ?? "risk disable"],
+      suggestedAllocationPct: 0,
+      suggestedUsdAt10k: 0,
+      suggestedUsdAt1k: 0,
+      suggestedUsdAt100: 0,
+    };
+  }
+  const capped = capAllocationPct(next.suggestedAllocationPct);
+  if (capped < next.suggestedAllocationPct) {
+    return {
+      ...next,
       suggestedAllocationPct: capped,
       suggestedUsdAt10k: Math.round(10_000 * capped * 100) / 100,
       suggestedUsdAt1k: Math.round(1_000 * capped * 100) / 100,
       suggestedUsdAt100: Math.round(100 * capped * 100) / 100,
-      weaknesses: [...decision.weaknesses, "allocation capped at 5% per trader"],
+      weaknesses: [...next.weaknesses, "allocation capped at 5% per trader"],
     };
   }
-  return decision;
+  return next;
 }

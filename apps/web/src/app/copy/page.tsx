@@ -14,7 +14,8 @@ function shortWallet(a: string) {
 }
 
 export default async function CopyDashboardPage() {
-  const { board, readiness, meta } = await loadCopyBoardPageData();
+  const { board, readiness, mirrorAnalytics, weeklyRisk, meta } =
+    await loadCopyBoardPageData();
 
   return (
     <main className={styles.main}>
@@ -26,13 +27,68 @@ export default async function CopyDashboardPage() {
           <h1>Who should AUGURIUM copy today?</h1>
         </div>
         {readiness && (
-          <span className={readiness.paperTradingReady ? styles.ok : styles.warn}>
-            Paper ready: {readiness.paperTradingReady ? "YES" : "NO"}
-          </span>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <span className={readiness.paperTradingReady ? styles.ok : styles.warn}>
+              Paper: {readiness.paperTradingReady ? "READY" : "NOT READY"}
+            </span>
+            <span
+              className={
+                (readiness as { liveCopyReady?: boolean }).liveCopyReady
+                  ? styles.ok
+                  : styles.warn
+              }
+            >
+              Live copy:{" "}
+              {(readiness as { liveCopyReady?: boolean }).liveCopyReady ? "READY" : "NOT READY"}
+            </span>
+          </div>
         )}
       </header>
 
       <SnapshotNotice meta={meta} />
+
+      {weeklyRisk && (
+        <section className={styles.grid} style={{ marginTop: "1rem" }}>
+          <article className={styles.card}>
+            <h2>Week {weeklyRisk.weekKey}</h2>
+            <p className={styles.metricSmall}>
+              PnL ${weeklyRisk.totalPnlUsd.toFixed(0)} / bankroll $
+              {weeklyRisk.bankrollUsd.toFixed(0)}
+            </p>
+          </article>
+          <article className={styles.card}>
+            <h2>Weekly stop</h2>
+            <p className={weeklyRisk.halted ? styles.warn : styles.ok}>
+              {weeklyRisk.halted
+                ? `HALTED (${(weeklyRisk.lossPct * 100).toFixed(1)}%)`
+                : `OK (max ${(weeklyRisk.maxLossPct * 100).toFixed(0)}% loss)`}
+            </p>
+          </article>
+          {mirrorAnalytics && (
+            <article className={styles.card}>
+              <h2>Paper vs leaders</h2>
+              <p className={styles.metricSmall}>
+                Paper ${mirrorAnalytics.paperPnlUsd.toFixed(0)} · leaders $
+                {mirrorAnalytics.sourcePnlUsd.toFixed(0)}
+              </p>
+            </article>
+          )}
+        </section>
+      )}
+
+      {readiness && !readiness.liveCopyReady && readiness.liveCopyBlockers.length > 0 && (
+        <section className={styles.modules} style={{ marginTop: "1rem" }}>
+          <h2 style={{ fontSize: "1rem" }}>Live copy — not ready yet</h2>
+          <ul style={{ fontSize: "0.9rem", lineHeight: 1.6 }}>
+            {readiness.liveCopyBlockers.slice(0, 6).map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+          <p className={styles.hint} style={{ marginTop: "0.5rem" }}>
+            See DEPLOY.md → Live copy trading for the full enable checklist.
+          </p>
+        </section>
+      )}
 
       {!board ? (
         <p className={styles.warn}>Unable to load copy board.</p>

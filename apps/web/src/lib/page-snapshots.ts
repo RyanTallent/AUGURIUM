@@ -121,30 +121,43 @@ export async function loadReadinessPageData(): Promise<{
 export async function loadCopyBoardPageData(): Promise<{
   board: CopyBoardReport | null;
   readiness: CopyTradingReadinessReport | null;
+  mirrorAnalytics: import("@augurium/copy-trading").CopyMirrorAnalytics | null;
+  weeklyRisk: import("@augurium/copy-trading").CopyWeeklyRiskStatus | null;
   meta: PageLoadMeta;
 }> {
   const snap = await getCopyTradingSnapshot<{
     board: CopyBoardReport;
     copyReadiness?: CopyTradingReadinessReport;
+    mirrorAnalytics?: import("@augurium/copy-trading").CopyMirrorAnalytics;
+    weeklyRisk?: import("@augurium/copy-trading").CopyWeeklyRiskStatus;
   }>();
   if (snap?.data?.board && !snap.meta.stale) {
     return {
       board: snap.data.board,
       readiness: snap.data.copyReadiness ?? null,
+      mirrorAnalytics: snap.data.mirrorAnalytics ?? null,
+      weeklyRisk: snap.data.weeklyRisk ?? null,
       meta: { source: "snapshot", snapshot: snap.meta },
     };
   }
   const live = await runWithWebDbGuard("copy-page-live", async () => {
+    const { computeCopyMirrorAnalytics, evaluateCopyWeeklyStopLoss } = await import(
+      "@augurium/copy-trading"
+    );
     const board = await computeCopyBoard(60);
     const readiness = await computeCopyTradingReadiness();
-    return { board, readiness };
+    const mirrorAnalytics = await computeCopyMirrorAnalytics();
+    const weeklyRisk = await evaluateCopyWeeklyStopLoss();
+    return { board, readiness, mirrorAnalytics, weeklyRisk };
   });
   if (live.data) {
     return { ...live.data, meta: { source: "live", stale: snap?.meta.stale } };
   }
   return {
     board: snap?.data?.board ?? null,
-    readiness: null,
+    readiness: snap?.data?.copyReadiness ?? null,
+    mirrorAnalytics: snap?.data?.mirrorAnalytics ?? null,
+    weeklyRisk: null,
     meta: { source: "unavailable", error: live.error ?? undefined, stale: true },
   };
 }

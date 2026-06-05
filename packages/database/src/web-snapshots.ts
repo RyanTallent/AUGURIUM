@@ -86,33 +86,32 @@ export interface SnapshotAgeSummary {
 }
 
 export async function getSnapshotAgeSummary(): Promise<SnapshotAgeSummary> {
-  const [d, c, r, s, w] = await Promise.all([
-    prisma.dashboardMetricsSnapshot.findUnique({
-      where: { id: "current" },
-      select: { capturedAt: true, refreshMs: true, error: true },
-    }),
-    prisma.copyTradingSnapshot.findUnique({
-      where: { id: "current" },
-      select: { capturedAt: true, refreshMs: true, error: true },
-    }),
-    prisma.readinessSnapshot.findUnique({
-      where: { id: "current" },
-      select: { capturedAt: true, refreshMs: true, error: true },
-    }),
-    prisma.shadowAnalyticsSnapshot.findUnique({
-      where: { id: "current" },
-      select: { capturedAt: true, refreshMs: true, error: true },
-    }),
-    prisma.webDiagnosticsSnapshot.findUnique({
-      where: { id: "current" },
-      select: { capturedAt: true },
-    }),
-  ]);
-
+  const select = { capturedAt: true, refreshMs: true, error: true } as const;
   const map = (
     row: { capturedAt: Date; refreshMs?: number | null; error?: string | null } | null,
   ): SnapshotMeta | null =>
     row ? metaFrom(row.capturedAt, row.refreshMs ?? null, row.error ?? null) : null;
+
+  const d = await prisma.dashboardMetricsSnapshot.findUnique({
+    where: { id: "current" },
+    select,
+  });
+  const c = await prisma.copyTradingSnapshot.findUnique({
+    where: { id: "current" },
+    select,
+  });
+  const r = await prisma.readinessSnapshot.findUnique({
+    where: { id: "current" },
+    select,
+  });
+  const s = await prisma.shadowAnalyticsSnapshot.findUnique({
+    where: { id: "current" },
+    select,
+  });
+  const w = await prisma.webDiagnosticsSnapshot.findUnique({
+    where: { id: "current" },
+    select: { capturedAt: true },
+  });
 
   return {
     dashboard: map(d),

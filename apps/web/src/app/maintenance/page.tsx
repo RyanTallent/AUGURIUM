@@ -176,7 +176,8 @@ export default async function MaintenancePage() {
         >
           {process.env.MAINTENANCE_ADMIN_TOKEN?.trim() ? "configured" : "not set"}
         </strong>
-        . Status JSON: <a href="/api/admin/maintenance/status">/api/admin/maintenance/status</a>
+        . Status JSON: <a href="/api/admin/maintenance/status">/api/admin/maintenance/status</a> · Deep
+        health: <a href="/api/health/deep">/api/health/deep</a>
       </p>
       <p style={{ fontSize: "0.9rem" }}>
         Set <code>MAINTENANCE_ADMIN_TOKEN</code> on the <strong>web</strong> service. One run at a

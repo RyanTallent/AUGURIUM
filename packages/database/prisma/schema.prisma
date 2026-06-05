@@ -40,6 +40,7 @@ model Market {
   executionOrders      ExecutionOrder[]
   executionPositions   ExecutionPosition[]
   copyPaperPositions   CopyPaperPosition[]
+  copyLiveMirrors      CopyLiveMirror[]
 }
 
 model Trader {
@@ -74,6 +75,7 @@ model Trader {
   tierHistory          TraderTierHistory[]
   copyControl          CopyTraderControl?
   copyPaperPositions   CopyPaperPosition[]
+  copyLiveMirrors      CopyLiveMirror[]
 }
 
 model TraderMetricsSnapshot {
@@ -674,6 +676,43 @@ model CopyTraderControl {
   updatedAt        DateTime @updatedAt
 
   trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+}
+
+/// Rolling weekly PnL guard for copy mirrors (resets each ISO week)
+model CopyWeeklyRiskState {
+  id                 String   @id @default("current")
+  weekKey            String
+  bankrollUsd        Float
+  realizedPnlUsd     Float    @default(0)
+  unrealizedPnlUsd   Float    @default(0)
+  halted             Boolean  @default(false)
+  haltedReason       String?
+  updatedAt          DateTime @updatedAt
+}
+
+/// Live copy mirror intent (orders blocked until CLOB + gates are enabled)
+model CopyLiveMirror {
+  id                String    @id @default(cuid())
+  traderId          String
+  sourcePositionKey String    @unique
+  marketId          String
+  side              String
+  status            String    @default("PENDING")
+  requestedSizeUsd  Float
+  entryPrice        Float
+  blockReason       String?
+  provider          String    @default("polymarket")
+  providerOrderId   String?
+  submittedAt       DateTime?
+  closedAt          DateTime?
+  openedAt          DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  trader Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([traderId, status])
+  @@index([status])
 }
 
 model CopyPaperPosition {

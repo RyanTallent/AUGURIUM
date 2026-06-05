@@ -12,6 +12,8 @@ import {
 } from "@augurium/database";
 import { computeAcceptanceForensics } from "./acceptance-forensics.js";
 import { computeCopyBoard } from "./compute-copy-board.js";
+import { computeLiveCopyReadiness } from "./live-copy-readiness.js";
+import { evaluateCopyWeeklyStopLoss } from "./copy-weekly-stop.js";
 import { detectOutlierOpportunities } from "./outliers.js";
 
 export interface CopyTradingReadinessReport {
@@ -19,6 +21,8 @@ export interface CopyTradingReadinessReport {
   after: MaintenanceMetricsSnapshot;
   paperTradingReady: boolean;
   liveTradingReady: boolean;
+  liveCopyReady: boolean;
+  liveCopyBlockers: string[];
   topTradersToCopy: Array<{ address: string; copyScore: number; recommendation: string }>;
   copyPortfolioRecommendations: Array<{ id: string; label: string; roi30d: number }>;
   riskAllocations: string[];
@@ -33,7 +37,7 @@ export interface CopyTradingReadinessReport {
 }
 
 export async function computeCopyTradingReadiness(): Promise<CopyTradingReadinessReport> {
-  const [after, readiness, shadowTrust, portfolio, paper, board, , lastMaint] =
+  const [after, readiness, shadowTrust, portfolio, paper, board, , lastMaint, liveCopy, weekly] =
     await Promise.all([
       collectMaintenanceMetrics(),
       computeLiveTradingReadiness(),
@@ -43,6 +47,8 @@ export async function computeCopyTradingReadiness(): Promise<CopyTradingReadines
       computeCopyBoard(60),
       detectOutlierOpportunities(),
       getLastMaintenanceRun(),
+      computeLiveCopyReadiness(),
+      evaluateCopyWeeklyStopLoss(),
     ]);
 
   const copyPaperOpens = await prisma.copyPaperPosition.count({ where: { status: "OPEN" } });
@@ -69,6 +75,12 @@ export async function computeCopyTradingReadiness(): Promise<CopyTradingReadines
       `paper closes ${paper.completedTrades}/100 required for paper validation`,
     );
   }
+  if (!liveCopy.ready) {
+    remainingBlockers.push(...liveCopy.blockers.slice(0, 3).map((b) => `live copy: ${b}`));
+  }
+  if (weekly.halted) {
+    remainingBlockers.push(weekly.haltedReason ?? "weekly copy loss limit");
+  }
 
   const repairsApplied: string[] = [];
   if (lastMaint?.steps?.length) {
@@ -93,6 +105,8 @@ export async function computeCopyTradingReadiness(): Promise<CopyTradingReadines
     after,
     paperTradingReady,
     liveTradingReady: readiness.liveTradingReady,
+    liveCopyReady: liveCopy.ready,
+    liveCopyBlockers: liveCopy.blockers,
     topTradersToCopy: board.topTradersToday.slice(0, 10).map((t) => ({
       address: t.address,
       copyScore: t.copyScore,

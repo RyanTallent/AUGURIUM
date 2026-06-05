@@ -55,7 +55,7 @@ The dashboard reads **precomputed snapshots** refreshed by the worker (`web:snap
 |----------|---------|---------|
 | `WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS` | `180000` | Snapshot refresh interval (1–5 min) |
 
-Health check URL: `/api/health` (ping + snapshot ages only).
+Health check URL: `/api/health` (instant 200, no database — required for Render deploy liveness). Deep diagnostics: `/api/health/deep`.
 
 Optional: schedule a **daily web restart** off-peak in Render if heap still drifts — this is a safety valve, not the primary fix.
 
@@ -127,7 +127,71 @@ Override per queue: `WORKER_INTERVAL_TRADER_SCORE_MS`, `WORKER_INTERVAL_SHADOW_S
 
 Worker memory: set `WORKER_HEAP_HIGH_MB` (default `1400`) to skip noncritical jobs when heap is high. Memory is logged after each job and stored on maintenance runs.
 
+## Auto-copy pipeline (worker)
+
+Runs every **9 minutes** (`WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS=540000`):
+
+1. Global trade ingest (market-wide scan)
+2. Discover new wallets from market holders
+3. **Wallet activity** for current COPY traders (see below)
+4. Rescore traders
+5. Sync open positions from Polymarket
+6. Paper-copy mirror (`PAPER_COPY_ENABLED=true`)
+7. Live-copy prep (`LIVE_COPY_ENABLED=false` until you enable it)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `COPY_AUTO_PIPELINE_ENABLED` | `true` on Render worker | Master switch |
+| `COPY_AUTO_INCLUDE_WALLET_ACTIVITY` | `true` | Refresh trades for COPY wallets each tick |
+| `COPY_AUTO_WALLET_ACTIVITY_BATCH` | `8` | COPY traders to refresh per tick |
+| `PAPER_COPY_ENABLED` | `true` | Paper mirror positions |
+| `COPY_PAPER_BANKROLL_USD` | `10000` | Paper sizing reference |
+| `COPY_WEEKLY_MAX_LOSS_PCT` | `0.2` | Halt **new** copy opens for the rest of the ISO week if paper PnL loss ≥ 20% of bankroll |
+| `COPY_MAX_SOURCE_ROI_TO_MIRROR` | `0.15` | Skip mirror if leader position already &gt;15% ROI (too late) |
+
+### Wallet activity (what it is)
+
+**Wallet activity** pulls each trader’s **recent Polymarket trades** from the Data API (not just the global firehose). In the auto pipeline we only fetch wallets marked **COPY** in `CopyTraderControl`, so scores and copy decisions stay fresh for the traders you might mirror—without re-scanning the entire platform every 9 minutes.
+
+The separate `wallet:activity` queue still rotates through **all** traders on its own schedule.
+
+## Live copy trading (enable when ready)
+
+**Do not** flip live flags until `/readiness` and `/copy` show system + live copy READY.
+
+### Phase A — data & paper (now)
+
+- `PAPER_COPY_ENABLED=true`
+- `LIVE_COPY_ENABLED=false`
+- `EXECUTION_ENABLED=false` or `EXECUTION_PROVIDER=paper`
+
+### Phase B — credentials (Render env group, worker only)
+
+| Secret | Required |
+|--------|----------|
+| `POLYMARKET_PRIVATE_KEY` | Yes |
+| `POLYMARKET_API_KEY` | Yes |
+| `POLYMARKET_API_SECRET` | Yes |
+| `POLYMARKET_API_PASSPHRASE` | Yes |
+| `POLYMARKET_FUNDER_ADDRESS` | Yes |
+
+### Phase C — live gates (explicit, worker only)
+
+```text
+EXECUTION_ENABLED=true
+EXECUTION_PROVIDER=polymarket
+LIVE_TRADING_ENABLED=true
+ALLOW_REAL_MONEY=true
+LIVE_COPY_ENABLED=true
+```
+
+### Phase D — CLOB implementation
+
+Set `POLYMARKET_CLOB_READY=true` only after `@polymarket/clob-client` is wired in `packages/execution` (until then, live mirrors are stored as `CopyLiveMirror` intents with status `BLOCKED`).
+
+Checklist is also computed in `computeLiveCopyReadiness()` and shown on `/copy` via snapshot.
+
 ## Safety
 
-- Polymarket live execution remains **NOT_READY** in code.
+- Polymarket live orders stay **blocked** until Phase C + D are complete.
 - TRADE_NOW thresholds are **not** lowered in this deployment.
