@@ -178,7 +178,31 @@ The separate `wallet:activity` queue still rotates through **all** traders on it
 | `POLYMARKET_API_PASSPHRASE` | Yes |
 | `POLYMARKET_FUNDER_ADDRESS` | Yes |
 
-### Phase C — live gates (explicit, worker only)
+### Phase C — live gates (worker — in `render.yaml` after CLOB wiring)
+
+Worker overrides shared `augurium-shared` for live copy:
+
+```text
+EXECUTION_ENABLED=true
+EXECUTION_PROVIDER=polymarket
+LIVE_TRADING_ENABLED=true
+ALLOW_REAL_MONEY=true
+POLYMARKET_CLOB_READY=true
+LIVE_COPY_ENABLED=true
+PAPER_COPY_ENABLED=false
+LIVE_COPY_SKIP_SYSTEM_READINESS=true
+COPY_LIVE_BANKROLL_USD=500
+COPY_LIVE_ORDER_TYPE=market
+POLYMARKET_SIGNATURE_TYPE=1
+```
+
+Verify on worker one-off:
+
+```bash
+npx tsx scripts/verify-polymarket-live.mjs
+```
+
+### Phase C (manual dashboard) — live gates (explicit, worker only)
 
 ```text
 EXECUTION_ENABLED=true

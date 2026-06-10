@@ -12,13 +12,18 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "node --test dist/**/*.test.js"
   },
   "dependencies": {
-    "@augurium/shadow": "*"
+    "@augurium/shadow": "*",
+    "@polymarket/clob-client-v2": "^1.0.6",
+    "viem": "^2.52.2"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

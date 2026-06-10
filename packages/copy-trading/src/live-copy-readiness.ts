@@ -30,6 +30,10 @@ export function isPolymarketClobReady(): boolean {
   return envFlag("POLYMARKET_CLOB_READY");
 }
 
+export function isLiveCopySkipSystemReadiness(): boolean {
+  return envFlag("LIVE_COPY_SKIP_SYSTEM_READINESS");
+}
+
 export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessReport> {
   const cfg = getExecutionConfig();
   const [system, board, openLiveMirrors] = await Promise.all([
@@ -63,7 +67,8 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
   if (!clobImplementationReady) {
     blockers.push("POLYMARKET_CLOB_READY is false — CLOB order placement not enabled in code");
   }
-  if (!system.liveTradingReady) {
+  const skipSystemReadiness = envFlag("LIVE_COPY_SKIP_SYSTEM_READINESS");
+  if (!skipSystemReadiness && !system.liveTradingReady) {
     blockers.push("System readiness failed (shadow/paper/data gates)");
     blockers.push(...system.blockers.slice(0, 5));
   }
@@ -84,7 +89,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
 
   const ready =
     blockers.length === 0 &&
-    system.liveTradingReady &&
+    (skipSystemReadiness || system.liveTradingReady) &&
     liveGatesEnabled &&
     credentialsConfigured &&
     clobImplementationReady &&

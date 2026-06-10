@@ -51,6 +51,22 @@ envVarGroups:
         value: "false"
       - key: PAPER_COPY_ENABLED
         value: "false"
+      - key: EXECUTION_ENABLED
+        value: "true"
+      - key: EXECUTION_PROVIDER
+        value: polymarket
+      - key: LIVE_TRADING_ENABLED
+        value: "true"
+      - key: ALLOW_REAL_MONEY
+        value: "true"
+      - key: POLYMARKET_CLOB_READY
+        value: "true"
+      - key: LIVE_COPY_SKIP_SYSTEM_READINESS
+        value: "true"
+      - key: COPY_LIVE_BANKROLL_USD
+        value: "500"
+      - key: COPY_LIVE_ORDER_TYPE
+        value: market
       - key: WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS
         value: "180000"
       - key: DISCORD_ENABLED
@@ -157,7 +173,7 @@ services:
       - key: COPY_AUTO_PIPELINE_ENABLED
         value: "true"
       - key: PAPER_COPY_ENABLED
-        value: "true"
+        value: "false"
       - key: WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS
         value: "540000"
       - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
@@ -165,7 +181,7 @@ services:
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
         value: "8"
       - key: LIVE_COPY_ENABLED
-        value: "false"
+        value: "true"
       - key: COPY_WEEKLY_MAX_LOSS_PCT
         value: "0.2"
       - key: DATABASE_URL

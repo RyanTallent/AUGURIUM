@@ -1,9 +1,11 @@
 import { getExecutionConfig, isLivePolymarketEnabled } from "./config.js";
-
-function clobReadyFlag(): boolean {
-  const v = process.env.POLYMARKET_CLOB_READY;
-  return v === "true" || v === "1" || v === "yes";
-}
+import { AssetType } from "@polymarket/clob-client-v2";
+import {
+  getPolymarketClobClient,
+  mapOutcomeSideToClob,
+  OrderType,
+  validateClobConnection,
+} from "./polymarket-clob.js";
 import { safeLogMessage } from "./redact.js";
 import type {
   CredentialValidation,
@@ -17,8 +19,14 @@ import type {
   ProviderPosition,
 } from "./types.js";
 
-const NOT_READY_MSG =
-  "Polymarket CLOB live execution is NOT_READY — install @polymarket/clob-client and complete credential wiring before enabling LIVE_TRADING_ENABLED";
+function clobReadyFlag(): boolean {
+  const v = process.env.POLYMARKET_CLOB_READY;
+  return v === "true" || v === "1" || v === "yes";
+}
+
+function useMarketOrders(): boolean {
+  return process.env.COPY_LIVE_ORDER_TYPE !== "limit";
+}
 
 export class PolymarketExecutionProvider implements ExecutionProvider {
   readonly name = "polymarket" as const;
@@ -30,17 +38,20 @@ export class PolymarketExecutionProvider implements ExecutionProvider {
     const cfg = getExecutionConfig();
     const live = isLivePolymarketEnabled(cfg);
     const clobReady = clobReadyFlag();
+    if (!cred.valid || !live || !clobReady) {
+      return {
+        ok: false,
+        ready: clobReady,
+        provider: "polymarket",
+        message: cred.message,
+      };
+    }
+    const ping = await validateClobConnection();
     return {
-      ok: cred.valid && live && clobReady,
-      ready: clobReady,
+      ok: ping.ok,
+      ready: ping.ok,
       provider: "polymarket",
-      message: cred.valid
-        ? live
-          ? clobReady
-            ? "Live gates on — CLOB ready flag set"
-            : NOT_READY_MSG
-          : "Credentials present but live trading gates are off"
-        : cred.message,
+      message: ping.message,
     };
   }
 
@@ -70,57 +81,171 @@ export class PolymarketExecutionProvider implements ExecutionProvider {
       };
     }
 
-    return {
-      valid: true,
-      configured: true,
-      message: "Credentials configured (not validated against CLOB — provider NOT_READY)",
-    };
-  }
+    if (!clobReadyFlag()) {
+      return {
+        valid: true,
+        configured: true,
+        message: "Credentials set — set POLYMARKET_CLOB_READY=true to enable orders",
+      };
+    }
 
-  private notReady(): never {
-    throw new Error(NOT_READY_MSG);
+    const ping = await validateClobConnection();
+    return {
+      valid: ping.ok,
+      configured: true,
+      message: ping.message,
+    };
   }
 
   async getBalance(): Promise<ProviderBalance> {
-    await this.validateCredentials();
-    this.notReady();
+    const client = await getPolymarketClobClient();
+    const bal = await client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+    const usd = Number(bal.balance ?? 0) / 1_000_000;
+    return { availableUsd: usd, totalUsd: usd };
   }
 
   async getOpenPositions(): Promise<ProviderPosition[]> {
-    this.notReady();
+    const client = await getPolymarketClobClient();
+    const orders = await client.getOpenOrders(undefined, true);
+    return orders.map((o) => ({
+      id: o.id,
+      marketId: o.market ?? o.asset_id ?? o.id,
+      side: o.side,
+      sizeUsd: Number(o.original_size ?? 0) * Number(o.price ?? 0),
+      entryPrice: Number(o.price ?? 0),
+      currentPrice: Number(o.price ?? 0),
+      status: o.status ?? "OPEN",
+    }));
   }
 
   async getOpenOrders(): Promise<ProviderOrder[]> {
-    this.notReady();
+    const client = await getPolymarketClobClient();
+    const orders = await client.getOpenOrders(undefined, true);
+    return orders.map((o) => ({
+      id: o.id,
+      marketId: o.market ?? o.asset_id ?? o.id,
+      side: o.side,
+      status: o.status ?? "OPEN",
+      requestedSizeUsd: Number(o.original_size ?? 0) * Number(o.price ?? 0),
+      filledSizeUsd: Number(o.size_matched ?? 0) * Number(o.price ?? 0),
+    }));
   }
 
-  async placeOrder(_request: OrderRequest): Promise<OrderResult> {
-    return {
-      success: false,
-      status: "FAILED",
-      errorMessage: safeLogMessage(NOT_READY_MSG),
-    };
+  async placeOrder(request: OrderRequest): Promise<OrderResult> {
+    if (!clobReadyFlag()) {
+      return {
+        success: false,
+        status: "BLOCKED",
+        errorMessage: "POLYMARKET_CLOB_READY is false",
+      };
+    }
+
+    const tokenID = request.asset?.trim();
+    if (!tokenID) {
+      return {
+        success: false,
+        status: "FAILED",
+        errorMessage: "Missing token asset id for Polymarket order",
+      };
+    }
+
+    try {
+      const client = await getPolymarketClobClient();
+      const side = mapOutcomeSideToClob(request.side);
+      const tickSize = await client.getTickSize(tokenID);
+      const negRisk = await client.getNegRisk(tokenID);
+      const options = { tickSize, negRisk };
+
+      let response: { orderID?: string; status?: string; errorMsg?: string };
+
+      if (useMarketOrders()) {
+        response = await client.createAndPostMarketOrder(
+          {
+            tokenID,
+            amount: request.requestedSizeUsd,
+            side,
+            orderType: OrderType.FOK,
+          },
+          options,
+          OrderType.FOK,
+        );
+      } else {
+        const price = Math.min(0.99, Math.max(0.01, request.requestedPrice ?? 0.5));
+        const size = Math.max(1, Math.round(request.requestedSizeUsd / price));
+        response = await client.createAndPostOrder(
+          {
+            tokenID,
+            price,
+            size,
+            side,
+          },
+          options,
+          OrderType.GTC,
+        );
+      }
+
+      const orderId = (response as { orderID?: string })?.orderID;
+      const ok = Boolean(orderId) && !response?.errorMsg;
+      return {
+        success: ok,
+        providerOrderId: orderId,
+        status: ok ? "SUBMITTED" : "FAILED",
+        filledSizeUsd: ok ? request.requestedSizeUsd : 0,
+        errorMessage: ok ? undefined : safeLogMessage(response?.errorMsg ?? "order rejected"),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "placeOrder failed";
+      return {
+        success: false,
+        status: "FAILED",
+        errorMessage: safeLogMessage(message),
+      };
+    }
   }
 
-  async cancelOrder(_orderId: string): Promise<{ success: boolean; errorMessage?: string }> {
-    return { success: false, errorMessage: NOT_READY_MSG };
+  async cancelOrder(orderId: string): Promise<{ success: boolean; errorMessage?: string }> {
+    try {
+      const client = await getPolymarketClobClient();
+      await client.cancelOrder({ orderID: orderId });
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        errorMessage: err instanceof Error ? err.message : "cancel failed",
+      };
+    }
   }
 
   async closePosition(
     _positionId: string,
     _fraction?: number,
   ): Promise<{ success: boolean; errorMessage?: string }> {
-    return { success: false, errorMessage: NOT_READY_MSG };
+    return {
+      success: false,
+      errorMessage: "closePosition not implemented — cancel open orders manually for now",
+    };
   }
 
   async syncPortfolio(): Promise<PortfolioSyncResult> {
-    const cred = await this.validateCredentials();
-    return {
-      balance: { availableUsd: 0, totalUsd: 0 },
-      positions: [],
-      orders: [],
-      mismatch: !cred.valid,
-      mismatchDetails: cred.valid ? [NOT_READY_MSG] : [cred.message],
-    };
+    try {
+      const balance = await this.getBalance();
+      const positions = await this.getOpenPositions();
+      const orders = await this.getOpenOrders();
+      return {
+        balance,
+        positions,
+        orders,
+        mismatch: false,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "sync failed";
+      return {
+        balance: { availableUsd: 0, totalUsd: 0 },
+        positions: [],
+        orders: [],
+        mismatch: true,
+        mismatchDetails: [message],
+      };
+    }
   }
 }
