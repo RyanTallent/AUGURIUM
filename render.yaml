@@ -182,6 +182,8 @@ services:
         value: "8"
       - key: LIVE_COPY_ENABLED
         value: "true"
+      - key: POLYMARKET_SIGNATURE_TYPE
+        value: "1"
       - key: COPY_WEEKLY_MAX_LOSS_PCT
         value: "0.2"
       - key: DATABASE_URL

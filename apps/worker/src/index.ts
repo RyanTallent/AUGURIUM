@@ -14,6 +14,7 @@ import {
   logJobMemory,
   shouldSkipQueueForMemory,
 } from "./lib/worker-memory.js";
+import { logPolymarketStartupCheck } from "./lib/polymarket-startup-check.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
@@ -99,6 +100,7 @@ async function bootstrap(): Promise<void> {
   }
 
   await drainRedisTriggers();
+  await logPolymarketStartupCheck();
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));
