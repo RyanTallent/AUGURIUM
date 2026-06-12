@@ -44,10 +44,9 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
 
   const credentialsConfigured =
     cfg.hasPrivateKey &&
-    cfg.hasApiKey &&
-    cfg.hasApiSecret &&
-    cfg.hasApiPassphrase &&
-    cfg.hasFunderAddress;
+    cfg.hasFunderAddress &&
+    ((cfg.hasApiKey && cfg.hasApiSecret && cfg.hasApiPassphrase) ||
+      isPolymarketClobReady());
 
   const liveGatesEnabled = isLivePolymarketEnabled(cfg);
   const clobImplementationReady = isPolymarketClobReady();
@@ -79,7 +78,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
   const enableChecklist = [
     "1. Run recovery + maintenance on production DB (impossible PnL = 0, shadow trust OK)",
     "2. Confirm /readiness shows LIVE TRADING READY = YES",
-    "3. Set Polymarket secrets on worker: PRIVATE_KEY, API_KEY, API_SECRET, API_PASSPHRASE, FUNDER_ADDRESS",
+    "3. Set Polymarket secrets on worker: PRIVATE_KEY and FUNDER_ADDRESS (API trio optional — derived from private key)",
     "4. Set EXECUTION_ENABLED=true, EXECUTION_PROVIDER=polymarket",
     "5. Set LIVE_TRADING_ENABLED=true and ALLOW_REAL_MONEY=true (worker only, after review)",
     "6. Set POLYMARKET_CLOB_READY=true only after @polymarket/clob-client is wired",
