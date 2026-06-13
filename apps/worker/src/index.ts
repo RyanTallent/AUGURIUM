@@ -114,6 +114,12 @@ async function bootstrap(): Promise<void> {
     );
   }
 
+  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
+  console.log("[worker] kicking off web:snapshot-refresh now");
+  void executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval").catch((err) =>
+    console.error("[worker] web:snapshot-refresh bootstrap error", err),
+  );
+
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));
   }, POLL_INTERVAL_MS);
