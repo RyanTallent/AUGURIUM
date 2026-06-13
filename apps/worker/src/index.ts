@@ -79,6 +79,9 @@ async function executeQueue(queue: string, reason: "interval" | "redis"): Promis
 }
 
 async function tick(): Promise<void> {
+  if (copyPipelineRunning) {
+    return;
+  }
   for (const queue of WORKER_QUEUES) {
     if (COPY_PIPELINE_ENABLED && queue === QUEUES.COPY_AUTO_PIPELINE) {
       continue;
@@ -159,11 +162,13 @@ async function bootstrap(): Promise<void> {
     scheduleCopyAutoPipeline();
   }
 
-  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
-  console.log("[worker] refreshing web snapshots in background (dashboard)");
-  void executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval").catch((err) =>
-    console.error("[worker] web:snapshot-refresh background error", err),
-  );
+  if (!copyPipelineRunning) {
+    lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
+    console.log("[worker] refreshing web snapshots in background (dashboard)");
+    void executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval").catch((err) =>
+      console.error("[worker] web:snapshot-refresh background error", err),
+    );
+  }
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));

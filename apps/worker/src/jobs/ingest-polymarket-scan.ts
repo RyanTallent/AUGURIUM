@@ -15,7 +15,7 @@ import {
 
 const STREAM_LEADERBOARD = "polymarket-scan:leaderboard";
 const WHALE_LIMIT = Number(process.env.POLYMARKET_SCAN_WHALE_LIMIT ?? "50");
-const WALLET_BATCH = Number(process.env.POLYMARKET_SCAN_WALLET_BATCH ?? "25");
+const WALLET_BATCH = Number(process.env.POLYMARKET_SCAN_WALLET_BATCH ?? "10");
 
 function badgeScore(badges: ScanTraderBadge[]): number {
   if (!badges.length) return 0;

@@ -1,11 +1,19 @@
 import { prisma } from "@augurium/database";
 import type { Prisma } from "@augurium/database";
 
+function shouldStoreRawPayload(): boolean {
+  const raw = process.env.INGEST_STORE_RAW_PAYLOAD;
+  if (raw === "false" || raw === "0") return false;
+  if (raw === "true" || raw === "1") return true;
+  return process.env.NODE_ENV !== "production";
+}
+
 export async function storeRawPayload(
   source: string,
   endpoint: string,
   payload: unknown,
 ): Promise<string> {
+  if (!shouldStoreRawPayload()) return "skipped";
   const row = await prisma.rawApiPayload.create({
     data: {
       source,

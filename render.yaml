@@ -212,7 +212,13 @@ services:
       - key: AUGURIUM_SERVICE
         value: worker
       - key: WORKER_PRISMA_CONNECTION_LIMIT
-        value: "8"
+        value: "10"
+      - key: WORKER_PRISMA_POOL_TIMEOUT_SEC
+        value: "60"
+      - key: INGEST_STORE_RAW_PAYLOAD
+        value: "false"
+      - key: POLYMARKET_SCAN_WALLET_BATCH
+        value: "10"
       - key: COPY_AUTO_PIPELINE_ENABLED
         value: "true"
       - key: PAPER_COPY_ENABLED
