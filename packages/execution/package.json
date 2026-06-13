@@ -21,6 +21,7 @@
     "test": "node --test dist/**/*.test.js"
   },
   "dependencies": {
+    "@augurium/database": "*",
     "@augurium/shadow": "*",
     "@polymarket/clob-client-v2": "^1.0.6",
     "polymarket-us": "^0.1.1",

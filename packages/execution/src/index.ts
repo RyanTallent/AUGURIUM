@@ -16,3 +16,4 @@ export * from "./polymarket-us-client.js";
 export * from "./polymarket-us-market-slug.js";
 export * from "./polymarket-us-provider.js";
 export * from "./polymarket-us-order-verify.js";
+export * from "./us-compatibility-gate.js";

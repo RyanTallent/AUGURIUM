@@ -2,6 +2,16 @@ import { PolymarketUS } from "polymarket-us";
 import { readConfigSecret } from "./render-secret.js";
 
 let cachedClient: PolymarketUS | null = null;
+let cachedPublicClient: PolymarketUS | null = null;
+
+export function getPolymarketUsPublicClient(): PolymarketUS {
+  if (cachedPublicClient) return cachedPublicClient;
+  cachedPublicClient = new PolymarketUS({
+    apiBaseUrl: process.env.POLYMARKET_US_API_BASE ?? "https://api.polymarket.us",
+    gatewayBaseUrl: process.env.POLYMARKET_US_GATEWAY_BASE ?? "https://gateway.polymarket.us",
+  });
+  return cachedPublicClient;
+}
 
 export function getPolymarketUsClient(): PolymarketUS {
   if (cachedClient) return cachedClient;

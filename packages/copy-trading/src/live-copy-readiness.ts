@@ -60,7 +60,11 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
 
   const blockers: string[] = [];
   if (!cfg.executionEnabled) blockers.push("EXECUTION_ENABLED is false");
-  if (cfg.provider !== "polymarket" && cfg.provider !== "polymarket-us") {
+  if (process.env.LIVE_COPY_ENABLED === "true" && cfg.provider !== "polymarket-us") {
+    blockers.push(
+      `LIVE_COPY requires EXECUTION_PROVIDER=polymarket-us (current: ${cfg.provider})`,
+    );
+  } else if (cfg.provider !== "polymarket" && cfg.provider !== "polymarket-us") {
     blockers.push(`EXECUTION_PROVIDER must be polymarket or polymarket-us (current: ${cfg.provider})`);
   }
   if (!liveGatesEnabled) {

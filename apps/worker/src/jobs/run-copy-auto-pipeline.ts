@@ -1,19 +1,25 @@
 import { prisma } from "@augurium/database";
 import { detectRisingWallets } from "@augurium/copy-trading";
+import { isUsOnlyLiveCopyMode, usePolymarketScanIntel } from "@augurium/shared";
 import { ingestGlobalTrades } from "./ingest-trades.js";
 import { discoverWalletsFromHolders } from "./discover-wallets.js";
 import { ingestWalletActivityForCopyTargets } from "./ingest-wallet-activity.js";
+import { ingestPolymarketScanLeaders } from "./ingest-polymarket-scan.js";
+import { ingestUsMarketCatalog } from "./ingest-us-market-catalog.js";
 import { runScoreTradersJob } from "./score-traders.js";
 import { syncPositionsFromApi } from "./sync-positions.js";
 import { syncPositionsForCopyTargetsFirst } from "./sync-positions-copy-priority.js";
+import { syncPositionsFromPolymarketScan } from "./sync-positions-polymarket-scan.js";
 import { runCopyPaperJob } from "./run-copy-paper.js";
 import { runCopyLiveJob } from "./run-copy-live.js";
+import { runPortfolioHealthReportJob } from "./run-portfolio-health-report.js";
 import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
 import { refreshCopyTraderControls } from "../lib/refresh-copy-trader-controls.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
 const INCLUDE_WALLET_ACTIVITY =
   process.env.COPY_AUTO_INCLUDE_WALLET_ACTIVITY !== "false";
+const PAPER_COPY_ENABLED = process.env.PAPER_COPY_ENABLED === "true";
 
 export interface CopyAutoPipelineSummary {
   enabled: boolean;
@@ -34,9 +40,7 @@ export interface CopyAutoPipelineSummary {
 
 function useLiteLivePath(): boolean {
   if (process.env.COPY_AUTO_SKIP_HEAVY_INGEST === "false") return false;
-  return (
-    process.env.LIVE_COPY_ENABLED === "true" && process.env.PAPER_COPY_ENABLED !== "true"
-  );
+  return process.env.LIVE_COPY_ENABLED === "true" && !PAPER_COPY_ENABLED;
 }
 
 const INCLUDE_WALLET_DISCOVER = process.env.COPY_AUTO_INCLUDE_WALLET_DISCOVER === "true";
@@ -61,7 +65,7 @@ async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Every ~5 min: scan → score COPY wallets → sync → verified live buy/sell. */
+/** Every ~3 min (configurable): PolymarketScan → score COPY wallets → sync → verified live buy/sell. */
 export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary> {
   const started = Date.now();
 
@@ -85,12 +89,16 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     };
   }
 
+  const scanIntel = usePolymarketScanIntel();
+  const usMode = scanIntel || isUsOnlyLiveCopyMode();
   const lite = useLiteLivePath();
   const run = await prisma.ingestionRun.create({
     data: { source: "copy:auto-pipeline", status: "running" },
   });
 
-  console.log(`[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"}`);
+  console.log(
+    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode}`,
+  );
 
   let tradesIngested = 0;
   let walletsDiscovered = 0;
@@ -105,7 +113,11 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
   let mirrorsSubmitted = 0;
 
   try {
-    if (!lite) {
+    if (usMode) {
+      walletsDiscovered = await pipelineStep("polymarket_scan_leaders", ingestPolymarketScanLeaders);
+      await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
+      console.log("[worker] copy:auto-pipeline US mode — skip global trade ingest and wallet discover");
+    } else if (!lite) {
       tradesIngested = await pipelineStep("trade_ingest", ingestGlobalTrades);
       walletsDiscovered = await pipelineStep("wallet_discover", discoverWalletsFromHolders);
     } else {
@@ -117,15 +129,19 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       }
     }
 
-    if (INCLUDE_WALLET_ACTIVITY) {
+    if (!usMode && INCLUDE_WALLET_ACTIVITY) {
       walletActivityIngested = await pipelineStep(
         "wallet_activity",
         ingestWalletActivityForCopyTargets,
       );
     }
 
-    const score = await pipelineStep("score_traders", runScoreTradersJob);
-    tradersScored = score.scored;
+    if (!usMode) {
+      const score = await pipelineStep("score_traders", runScoreTradersJob);
+      tradersScored = score.scored;
+    } else {
+      console.log("[worker] copy:auto-pipeline US mode — trader scores from PolymarketScan ingest");
+    }
 
     const controls = await pipelineStep("copy_trader_controls", refreshCopyTraderControls);
     console.log(
@@ -136,7 +152,9 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       detectRisingWallets(Number(process.env.COPY_RISING_WALLET_LIMIT ?? "25")),
     );
 
-    if (lite) {
+    if (usMode) {
+      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
+    } else if (lite) {
       positionsSynced = await pipelineStep(
         "position_sync_copy",
         syncPositionsForCopyTargetsFirst,
@@ -151,17 +169,21 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       });
     }
 
-    const paper = await pipelineStep("paper_copy", runCopyPaperJob);
-    paperCopyEnabled = paper.copyEnabled;
-    paperOpened = paper.opened;
-    paperClosed = paper.closed;
+    if (PAPER_COPY_ENABLED) {
+      const paper = await pipelineStep("paper_copy", runCopyPaperJob);
+      paperCopyEnabled = paper.copyEnabled;
+      paperOpened = paper.opened;
+      paperClosed = paper.closed;
+    }
 
     const live = await pipelineStep("live_copy", runCopyLiveJob);
     liveReady = live.ready;
     liveMirrorsBlocked = live.mirrorsBlocked;
     mirrorsSubmitted = live.mirrorsSubmitted;
 
-    const message = `auto copy: trades=${tradesIngested} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${paperCopyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
+    await pipelineStep("portfolio_health", runPortfolioHealthReportJob);
+
+    const message = `auto copy: trades=${tradesIngested} scanWallets=${walletsDiscovered} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
 
     await prisma.ingestionRun.update({
       where: { id: run.id },
@@ -170,6 +192,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         finishedAt: new Date(),
         itemCount: tradersScored + paperOpened + mirrorsSubmitted,
         metadata: {
+          usMode,
           lite,
           tradesIngested,
           walletsDiscovered,

@@ -20,6 +20,7 @@ import {
 } from "./lib/worker-memory.js";
 import { logPolymarketStartupCheck } from "./lib/polymarket-startup-check.js";
 import { ensureLiveCopyDiscordOnStartup } from "./lib/enqueue-live-copy-discord.js";
+import { runPortfolioHealthReportJob } from "./jobs/run-portfolio-health-report.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
@@ -167,6 +168,16 @@ async function bootstrap(): Promise<void> {
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));
   }, POLL_INTERVAL_MS);
+
+  const healthIntervalMs = Number(process.env.WORKER_INTERVAL_PORTFOLIO_HEALTH_MS ?? "86400000");
+  setInterval(() => {
+    void runPortfolioHealthReportJob().catch((err) =>
+      console.error("[worker] portfolio health report error", err),
+    );
+  }, healthIntervalMs);
+  console.log(
+    `[worker] portfolio health report every ${Math.round(healthIntervalMs / 3600000)}h`,
+  );
 
   await tick();
 }

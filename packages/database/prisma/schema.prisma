@@ -701,8 +701,14 @@ model CopyLiveMirror {
   requestedSizeUsd  Float
   entryPrice        Float
   blockReason       String?
-  provider          String    @default("polymarket")
+  provider          String    @default("polymarket-us")
   providerOrderId   String?
+  usMarketSlug      String?
+  matchConfidence   Float?
+  matchReason       String?
+  realizedPnlUsd    Float?
+  ladderState       String?
+  ladderStep        Int?
   submittedAt       DateTime?
   closedAt          DateTime?
   openedAt          DateTime  @default(now())
@@ -713,6 +719,33 @@ model CopyLiveMirror {
 
   @@index([traderId, status])
   @@index([status])
+  @@index([usMarketSlug])
+}
+
+/// Manual US leader watchlist (PolymarketScan / ops curated wallets)
+model UsLeaderWatchlist {
+  id        String   @id @default(cuid())
+  wallet    String   @unique
+  enabled   Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+/// Phase 2 — partial take-profit ladder state (schema only in Phase 1)
+model CopyLiveLadderState {
+  id              String   @id @default(cuid())
+  mirrorId        String   @unique
+  rungsCompleted  Int      @default(0)
+  nextRungPct     Float?
+  remainingPct    Float    @default(1)
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([mirrorId])
 }
 
 model CopyPaperPosition {

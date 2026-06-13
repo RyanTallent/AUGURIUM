@@ -78,7 +78,9 @@ export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
 
   for (const ev of events) {
     const payload = ev.payload as unknown as DiscordEventPayload;
-    const result = await sendDiscordWebhook(config, payload);
+    const result = await sendDiscordWebhook(config, payload, fetch, {
+      eventType: ev.eventType,
+    });
 
     if (result.status === "SENT") {
       await prisma.discordEvent.update({

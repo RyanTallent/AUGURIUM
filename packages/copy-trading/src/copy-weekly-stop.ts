@@ -1,4 +1,5 @@
 import { prisma } from "@augurium/database";
+import { isUsOnlyLiveCopyMode } from "@augurium/shared";
 
 const DEFAULT_BANKROLL = Number(process.env.COPY_PAPER_BANKROLL_USD ?? "10000");
 const MAX_WEEKLY_LOSS_PCT = Number(process.env.COPY_WEEKLY_MAX_LOSS_PCT ?? "0.2");
@@ -37,7 +38,7 @@ function weekStartUtc(weekKey: string): Date {
   return monday;
 }
 
-async function sumWeeklyCopyPnl(weekKey: string): Promise<{
+async function sumWeeklyPaperPnl(weekKey: string): Promise<{
   realized: number;
   unrealized: number;
 }> {
@@ -56,6 +57,61 @@ async function sumWeeklyCopyPnl(weekKey: string): Promise<{
     realized: closed._sum.realizedPnl ?? 0,
     unrealized: open._sum.unrealizedPnl ?? 0,
   };
+}
+
+async function sumWeeklyLiveUsPnl(weekKey: string): Promise<{
+  realized: number;
+  unrealized: number;
+}> {
+  const start = weekStartUtc(weekKey);
+
+  const closed = await prisma.copyLiveMirror.aggregate({
+    where: {
+      status: "CLOSED",
+      closedAt: { gte: start },
+    },
+    _sum: { realizedPnlUsd: true },
+  });
+
+  const openMirrors = await prisma.copyLiveMirror.findMany({
+    where: { status: "OPEN" },
+    select: { requestedSizeUsd: true, entryPrice: true, usMarketSlug: true },
+  });
+
+  let unrealized = 0;
+  if (openMirrors.length > 0) {
+    try {
+      const { createExecutionProvider, getExecutionConfig } = await import("@augurium/execution");
+      const cfg = getExecutionConfig();
+      if (cfg.provider === "polymarket-us") {
+        const provider = createExecutionProvider();
+        const positions = await provider.getOpenPositions();
+        const bySlug = new Map(positions.map((p) => [p.id, p.sizeUsd]));
+        for (const m of openMirrors) {
+          const slug = m.usMarketSlug;
+          const current = slug ? bySlug.get(slug) ?? 0 : 0;
+          unrealized += current - m.requestedSizeUsd;
+        }
+      }
+    } catch {
+      unrealized = 0;
+    }
+  }
+
+  return {
+    realized: closed._sum.realizedPnlUsd ?? 0,
+    unrealized,
+  };
+}
+
+async function sumWeeklyCopyPnl(weekKey: string): Promise<{
+  realized: number;
+  unrealized: number;
+}> {
+  if (isUsOnlyLiveCopyMode()) {
+    return sumWeeklyLiveUsPnl(weekKey);
+  }
+  return sumWeeklyPaperPnl(weekKey);
 }
 
 export async function evaluateCopyWeeklyStopLoss(

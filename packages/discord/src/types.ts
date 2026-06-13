@@ -27,7 +27,8 @@ export type DiscordEventType =
   | "EXECUTION_BLOCKED"
   | "EXECUTION_ERROR"
   | "EXECUTION_RECONCILIATION"
-  | "COPY_LIVE_CLOSED";
+  | "COPY_LIVE_CLOSED"
+  | "PORTFOLIO_HEALTH";
 
 export interface DiscordEmbedField {
   name: string;

@@ -1,6 +1,6 @@
 /** Shared domain types for AUGURIUM */
 
-export type MarketSource = "polymarket";
+export type MarketSource = "polymarket" | "polymarket-us";
 
 export interface TraderScore {
   address: string;
@@ -132,6 +132,11 @@ export const APP_NAME = "AUGURIUM";
 
 export {
   getDiscordConfig,
+  discordChannelForEventType,
+  resolveDiscordWebhookUrl,
+  canSendDiscordToChannel,
   type DiscordConfig,
   type DiscordEnvConfig,
+  type DiscordWebhookChannel,
 } from "./discord-config.js";
+export { isUsOnlyLiveCopyMode, usePolymarketScanIntel, requirePolymarketUsForLiveCopy } from "./us-copy-mode.js";

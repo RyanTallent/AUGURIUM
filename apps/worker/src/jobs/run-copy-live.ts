@@ -13,12 +13,12 @@ import {
 } from "@augurium/copy-trading";
 import {
   createExecutionProvider,
+  evaluateUsCompatibilityGate,
   getExecutionConfig,
   getPolymarketUsClient,
   hasUsPositionOnMarket,
   isLivePolymarketEnabled,
   isPolymarketUsReady,
-  resolveUsMarketSlug,
   verifyUsOrderFill,
 } from "@augurium/execution";
 import type { ExecutionProvider } from "@augurium/execution";
@@ -33,9 +33,22 @@ type LiveMirrorRow = {
   side: string;
   requestedSizeUsd: number;
   entryPrice: number;
+  usMarketSlug?: string | null;
   trader: { address: string };
-  market: { title: string; slug: string | null };
+  market: { title: string; slug: string | null; category?: string | null };
 };
+
+async function resolveMirrorUsSlug(mirror: LiveMirrorRow): Promise<string | null> {
+  if (mirror.usMarketSlug?.trim()) return mirror.usMarketSlug.trim();
+  const gate = await evaluateUsCompatibilityGate({
+    globalMarketId: mirror.sourcePositionKey,
+    globalTitle: mirror.market.title,
+    globalSlug: mirror.market.slug,
+    side: mirror.side,
+    category: mirror.market.category,
+  });
+  return gate.usMarketSlug;
+}
 
 async function finalizeMirrorClose(
   mirror: LiveMirrorRow,
@@ -72,10 +85,7 @@ async function closeMirrorOnUs(params: {
     return "closed";
   }
 
-  const slug = await resolveUsMarketSlug({
-    slug: mirror.market.slug,
-    title: mirror.market.title,
-  });
+  const slug = await resolveMirrorUsSlug(mirror);
   if (!slug) return "skipped";
 
   const before = await hasUsPositionOnMarket(client, slug);
@@ -132,9 +142,16 @@ async function reconcileSubmittedMirrors(): Promise<number> {
   const client = getPolymarketUsClient();
   let promoted = 0;
   for (const m of rows) {
-    const slug = await resolveUsMarketSlug({
-      slug: m.market.slug,
-      title: m.market.title,
+    const slug = await resolveMirrorUsSlug({
+      id: m.id,
+      status: m.status,
+      sourcePositionKey: m.sourcePositionKey,
+      side: m.side,
+      requestedSizeUsd: m.requestedSizeUsd,
+      entryPrice: m.entryPrice,
+      usMarketSlug: m.usMarketSlug,
+      trader: { address: "" },
+      market: m.market,
     });
     if (!slug) continue;
     const pos = await hasUsPositionOnMarket(client, slug);
@@ -189,7 +206,7 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
 
   const rows = await prisma.copyLiveMirror.findMany({
     where: { status: "OPEN" },
-    include: { market: { select: { slug: true, title: true } } },
+    include: { market: { select: { slug: true, title: true, category: true } } },
   });
   if (rows.length === 0) return 0;
 
@@ -215,7 +232,7 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
 
   let closed = 0;
   for (const m of rows) {
-    let slug = m.market.slug?.trim() || null;
+    let slug = m.usMarketSlug?.trim() || null;
     if (slug) {
       try {
         await client.markets.retrieveBySlug(slug);
@@ -224,9 +241,16 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
       }
     }
     if (!slug) {
-      slug = await resolveUsMarketSlug({
-        slug: m.market.slug,
-        title: m.market.title,
+      slug = await resolveMirrorUsSlug({
+        id: m.id,
+        status: m.status,
+        sourcePositionKey: m.sourcePositionKey,
+        side: m.side,
+        requestedSizeUsd: m.requestedSizeUsd,
+        entryPrice: m.entryPrice,
+        usMarketSlug: m.usMarketSlug,
+        trader: { address: "" },
+        market: m.market,
       });
     }
     if (!slug) {
@@ -330,6 +354,26 @@ async function loadCopyTargetPositions(): Promise<
 }
 
 export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
+  const cfg = getExecutionConfig();
+  if (cfg.provider !== "polymarket-us") {
+    return {
+      enabled: ENABLED,
+      ready: false,
+      mirrorsPending: 0,
+      mirrorsBlocked: 0,
+      mirrorsSubmitted: 0,
+      mirrorsClosed: 0,
+      bankrollUsd: null,
+      availableUsd: null,
+      deployedUsd: null,
+      tradeSizeUsd: null,
+      bankrollSource: null,
+      usOpenPositions: [],
+      blockers: [`EXECUTION_PROVIDER must be polymarket-us (got ${cfg.provider})`],
+      message: "live copy rejected — US-only execution required",
+    };
+  }
+
   const readiness = await computeLiveCopyReadiness();
   const sizing = getLiveCopySizingConfig();
   const emptySizing = {
@@ -380,7 +424,6 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     : await loadCopyTargetPositions();
 
   const sourceKeys = new Set(sources.map((s) => s.sourcePositionKey));
-  const cfg = getExecutionConfig();
   let provider: ExecutionProvider | null = null;
   let client: ReturnType<typeof getPolymarketUsClient> | null = null;
 
@@ -595,7 +638,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       take: MAX_ORDERS_PER_RUN,
       include: {
         trader: { select: { address: true } },
-        market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true } },
+        market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true, category: true } },
       },
     });
 
@@ -637,16 +680,24 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       let tokenId: string | null = null;
 
       if (cfg.provider === "polymarket-us") {
-        tokenId = await resolveUsMarketSlug({
-          slug: mirror.market.slug,
-          title: mirror.market.title,
+        const gate = await evaluateUsCompatibilityGate({
+          globalMarketId: mirror.marketId,
+          globalTitle: mirror.market.title,
+          globalSlug: mirror.market.slug,
+          side: mirror.side,
+          category: mirror.market.category,
         });
-        if (!tokenId) {
+
+        if (!gate.allowed || !gate.usMarketSlug) {
+          const blockReason = gate.reason;
           await prisma.copyLiveMirror.update({
             where: { id: mirror.id },
             data: {
               status: "BLOCKED",
-              blockReason: "no matching Polymarket US market slug",
+              blockReason,
+              usMarketSlug: gate.usMarketSlug,
+              matchConfidence: gate.confidence,
+              matchReason: gate.reason,
             },
           });
           mirrorsBlocked++;
@@ -658,10 +709,20 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
             sizeUsd: orderSizeUsd,
             entryPrice: mirror.entryPrice,
             traderAddress: mirror.trader.address,
-            blockReason: "no matching Polymarket US market slug",
+            blockReason,
           });
           continue;
         }
+
+        tokenId = gate.usMarketSlug;
+        await prisma.copyLiveMirror.update({
+          where: { id: mirror.id },
+          data: {
+            usMarketSlug: gate.usMarketSlug,
+            matchConfidence: gate.confidence,
+            matchReason: gate.reason,
+          },
+        });
       } else {
         const pos = await prisma.position.findUnique({
           where: { externalKey: mirror.sourcePositionKey },

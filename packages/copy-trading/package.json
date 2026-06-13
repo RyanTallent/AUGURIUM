@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@augurium/database": "*",
-    "@augurium/execution": "*"
+    "@augurium/execution": "*",
+    "@augurium/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

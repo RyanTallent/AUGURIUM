@@ -76,9 +76,21 @@ envVarGroups:
       - key: COPY_LIVE_USE_ACCOUNT_BALANCE
         value: "true"
       - key: COPY_LIVE_POSITION_PCT
-        value: "0.15"
+        value: "0.05"
       - key: COPY_LIVE_MAX_DEPLOYED_PCT
-        value: "0.50"
+        value: "0.25"
+      - key: COPY_MAX_CAPITAL_PER_TRADER_PCT
+        value: "0.25"
+      - key: COPY_MAX_CAPITAL_PER_MARKET_PCT
+        value: "0.20"
+      - key: COPY_INTEL_SOURCE
+        value: polymarketscan
+      - key: US_COMPAT_STRICT_MODE
+        value: "true"
+      - key: US_COMPAT_MIN_CONFIDENCE
+        value: "0.90"
+      - key: COPY_MAX_SOURCE_ROI_TO_MIRROR
+        value: "0.20"
       - key: COPY_LIVE_ORDER_TYPE
         value: market
       - key: WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS
@@ -86,6 +98,20 @@ envVarGroups:
       - key: DISCORD_ENABLED
         sync: false
       - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: DISCORD_WEBHOOK_TRADE_ENTER
+        sync: false
+      - key: DISCORD_WEBHOOK_TRADE_EXIT
+        sync: false
+      - key: DISCORD_WEBHOOK_TRADE_PROBLEM
+        sync: false
+      - key: DISCORD_WEBHOOK_PORTFOLIO_HEALTH
+        sync: false
+      - key: DISCORD_WEBHOOK_BRAIN
+        sync: false
+      - key: DISCORD_WEBHOOK_RISK
+        sync: false
+      - key: DISCORD_WEBHOOK_JOURNAL
         sync: false
       - key: POLYMARKET_PRIVATE_KEY
         sync: false
@@ -192,15 +218,23 @@ services:
       - key: PAPER_COPY_ENABLED
         value: "false"
       - key: WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS
-        value: "300000"
-      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
+        value: "180000"
+      - key: COPY_INTEL_SOURCE
+        value: polymarketscan
+      - key: US_COMPAT_STRICT_MODE
         value: "true"
+      - key: US_COMPAT_MIN_CONFIDENCE
+        value: "0.90"
+      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
+        value: "false"
+      - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
+        value: "false"
+      - key: WORKER_INTERVAL_PORTFOLIO_HEALTH_MS
+        value: "86400000"
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
         value: "60"
       - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
         value: "false"
-      - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
-        value: "true"
       - key: COPY_LIVE_CANDIDATE_POOL
         value: "1000"
       - key: COPY_LIVE_MAX_LEADERS
@@ -233,10 +267,28 @@ services:
         value: "true"
       - key: COPY_LIVE_TAKE_PROFIT_PCT
         value: "0.2"
+      - key: COPY_LIVE_POSITION_PCT
+        value: "0.05"
+      - key: COPY_LIVE_MAX_DEPLOYED_PCT
+        value: "0.25"
       - key: COPY_MAX_CAPITAL_PER_TRADER_PCT
-        value: "0.50"
+        value: "0.25"
       - key: COPY_MAX_CAPITAL_PER_MARKET_PCT
         value: "0.20"
+      - key: DISCORD_WEBHOOK_TRADE_ENTER
+        sync: false
+      - key: DISCORD_WEBHOOK_TRADE_EXIT
+        sync: false
+      - key: DISCORD_WEBHOOK_TRADE_PROBLEM
+        sync: false
+      - key: DISCORD_WEBHOOK_PORTFOLIO_HEALTH
+        sync: false
+      - key: DISCORD_WEBHOOK_BRAIN
+        sync: false
+      - key: DISCORD_WEBHOOK_RISK
+        sync: false
+      - key: DISCORD_WEBHOOK_JOURNAL
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db

@@ -1,6 +1,6 @@
 import { COPY_RISK_LIMITS, buildExposureSnapshot } from "./copy-risk.js";
 
-const MAX_SOURCE_ROI = Number(process.env.COPY_MAX_SOURCE_ROI_TO_MIRROR ?? "0.15");
+const MAX_SOURCE_ROI = Number(process.env.COPY_MAX_SOURCE_ROI_TO_MIRROR ?? "0.20");
 
 /** ROI of a leader position (pnl / cost basis). */
 export function leaderPositionRoi(pnl: number, size: number, avgPrice: number): number {

@@ -5,6 +5,10 @@ import {
   sendDiscordWebhook,
   type DiscordEventPayload,
 } from "@augurium/discord";
+import {
+  discordChannelForEventType,
+  resolveDiscordWebhookUrl,
+} from "@augurium/shared";
 
 export const LIVE_COPY_DISCORD_PREFIX = "copy:live:";
 
@@ -44,13 +48,21 @@ export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
   const now = new Date();
   const events = await prisma.discordEvent.findMany({
     where: {
-      dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX },
       OR: [
-        { status: "PENDING" },
+        { dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX } },
+        { dedupeKey: { startsWith: "portfolio:health:" } },
+        { eventType: { in: ["PORTFOLIO_HEALTH", "RISK_ALERT", "COPY_WEEKLY_STOP"] } },
+      ],
+      AND: [
         {
-          status: "FAILED",
-          retryCount: { lt: MAX_RETRIES },
-          OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
+          OR: [
+            { status: "PENDING" },
+            {
+              status: "FAILED",
+              retryCount: { lt: MAX_RETRIES },
+              OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
+            },
+          ],
         },
       ],
     },
@@ -61,7 +73,9 @@ export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
   let sent = 0;
   for (const ev of events) {
     const payload = ev.payload as unknown as DiscordEventPayload;
-    const result = await sendDiscordWebhook(config, payload);
+    const result = await sendDiscordWebhook(config, payload, fetch, {
+      eventType: ev.eventType,
+    });
 
     if (result.status === "SENT") {
       await prisma.discordEvent.update({

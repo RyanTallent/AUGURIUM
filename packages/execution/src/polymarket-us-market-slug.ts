@@ -1,8 +1,19 @@
-import { getPolymarketUsClient } from "./polymarket-us-client.js";
+import { getPolymarketUsClient, getPolymarketUsPublicClient, isPolymarketUsReady } from "./polymarket-us-client.js";
+import { prisma } from "@augurium/database";
 
 export interface UsMarketLookup {
   slug?: string | null;
   title: string;
+  category?: string | null;
+}
+
+export const US_MATCH_MIN_CONFIDENCE = Number(process.env.US_COMPAT_MIN_CONFIDENCE ?? "0.90");
+
+export interface UsCompatibilityMatch {
+  slug: string | null;
+  confidence: number;
+  reason: string;
+  usTitle?: string;
 }
 
 function normalizeTitle(title: string): string {
@@ -267,41 +278,171 @@ async function trySlugCandidates(
   return null;
 }
 
-export async function resolveUsMarketSlug(market: UsMarketLookup): Promise<string | null> {
-  const client = getPolymarketUsClient();
-  const slug = market.slug?.trim();
+function titleMatchConfidence(expectedTitle: string, usTitle: string): number {
+  if (!usMarketTitlesMatch(expectedTitle, usTitle)) return 0;
+  const expected = normalizeTitle(expectedTitle);
+  const actual = normalizeTitle(usTitle);
+  if (expected === actual) return 1;
+  const tokens = expected
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-z0-9.+-]/g, ""))
+    .filter((t) => t.length > 2);
+  if (tokens.length === 0) return 0.7;
+  const matched = tokens.filter((t) => actual.includes(t)).length;
+  return Math.min(0.99, 0.6 + (matched / tokens.length) * 0.35);
+}
 
-  if (slug) {
-    const resolved =
-      (await trySlugCandidates(client, slug, market.title)) ??
-      (await tryEventSlugCandidates(client, slug, market.title));
-    if (resolved) return resolved;
+async function verifyUsMarketActive(
+  client: ReturnType<typeof getPolymarketUsClient>,
+  slug: string,
+  expectedTitle: string,
+): Promise<{ ok: boolean; usTitle: string; confidence: number }> {
+  try {
+    const retrieved = await client.markets.retrieveBySlug(slug);
+    const market = retrieved.market;
+    if (!market || market.closed || market.active === false) {
+      return { ok: false, usTitle: "", confidence: 0 };
+    }
+    const usTitle = readUsMarketTitle(retrieved);
+    const confidence = titleMatchConfidence(expectedTitle, usTitle);
+    return { ok: confidence >= US_MATCH_MIN_CONFIDENCE, usTitle, confidence };
+  } catch {
+    return { ok: false, usTitle: "", confidence: 0 };
+  }
+}
+
+/** Match leader global market metadata against US catalog rows (no global slug translation). */
+export async function matchUsMarketFromCatalog(
+  leader: UsMarketLookup,
+): Promise<UsCompatibilityMatch> {
+  const catalog = await prisma.market.findMany({
+    where: { source: "polymarket-us", active: true, closed: false },
+    select: { slug: true, title: true, category: true },
+    take: 500,
+    orderBy: { updatedAt: "desc" },
+  });
+
+  let best: UsCompatibilityMatch = {
+    slug: null,
+    confidence: 0,
+    reason: "no US catalog match",
+  };
+
+  for (const row of catalog) {
+    if (!row.slug) continue;
+    if (
+      leader.category &&
+      row.category &&
+      normalizeTitle(leader.category) !== normalizeTitle(row.category)
+    ) {
+      continue;
+    }
+    const confidence = titleMatchConfidence(leader.title, row.title);
+    if (confidence > best.confidence) {
+      best = {
+        slug: row.slug,
+        confidence,
+        reason: `catalog title match (${(confidence * 100).toFixed(0)}%)`,
+        usTitle: row.title,
+      };
+    }
   }
 
-  const queries = buildSearchQueries(market.title);
-  if (queries.length === 0) return null;
+  return best;
+}
 
-  let bestSlug: string | null = null;
-  let bestScore = -1;
+async function searchUsApiByTitle(
+  client: ReturnType<typeof getPolymarketUsClient>,
+  expectedTitle: string,
+): Promise<UsCompatibilityMatch> {
+  const queries = buildSearchQueries(expectedTitle);
+  let best: UsCompatibilityMatch = {
+    slug: null,
+    confidence: 0,
+    reason: "no US API title search match",
+  };
 
-  try {
-    for (const query of queries) {
+  for (const query of queries) {
+    try {
       const search = await client.search.query({ query, limit: 24, status: "active" });
-
       for (const event of search.events ?? []) {
-        const slug = pickBestMarketSlug(market.title, event.markets ?? [], event.title ?? "");
+        const slug = pickBestMarketSlug(expectedTitle, event.markets ?? [], event.title ?? "");
         if (!slug) continue;
-
-        const score = slugMatchScore(slug);
-        if (score > bestScore) {
-          bestScore = score;
-          bestSlug = slug;
+        const found = event.markets?.find((m) => m.slug === slug);
+        const marketTitle = found
+          ? readSearchMarketTitle(found as { title?: string; question?: string })
+          : (event.title ?? "");
+        const confidence = titleMatchConfidence(expectedTitle, marketTitle);
+        if (confidence > best.confidence) {
+          best = {
+            slug,
+            confidence,
+            reason: `US API title search (${(confidence * 100).toFixed(0)}%)`,
+            usTitle: marketTitle,
+          };
         }
       }
+    } catch {
+      // continue queries
     }
-  } catch {
-    return bestSlug;
   }
 
-  return bestSlug;
+  return best;
+}
+
+/**
+ * Strict US compatibility gate for live execution.
+ * Global slug is used only for leader title/category context — never for US slug translation.
+ */
+export async function resolveUsMarketForExecution(
+  leader: UsMarketLookup,
+): Promise<UsCompatibilityMatch> {
+  const client = isPolymarketUsReady() ? getPolymarketUsClient() : getPolymarketUsPublicClient();
+
+  const catalogMatch = await matchUsMarketFromCatalog(leader);
+  if (catalogMatch.slug && catalogMatch.confidence >= US_MATCH_MIN_CONFIDENCE) {
+    const verified = await verifyUsMarketActive(client, catalogMatch.slug, leader.title);
+    if (verified.ok) {
+      return {
+        slug: catalogMatch.slug,
+        confidence: verified.confidence,
+        reason: `catalog+verified: ${catalogMatch.reason}`,
+        usTitle: verified.usTitle,
+      };
+    }
+  }
+
+  const searchMatch = await searchUsApiByTitle(client, leader.title);
+  if (searchMatch.slug && searchMatch.confidence >= US_MATCH_MIN_CONFIDENCE) {
+    const verified = await verifyUsMarketActive(client, searchMatch.slug, leader.title);
+    if (verified.ok) {
+      return {
+        slug: searchMatch.slug,
+        confidence: verified.confidence,
+        reason: `api-search+verified: ${searchMatch.reason}`,
+        usTitle: verified.usTitle,
+      };
+    }
+  }
+
+  const best = catalogMatch.confidence >= searchMatch.confidence ? catalogMatch : searchMatch;
+  if (best.confidence < US_MATCH_MIN_CONFIDENCE) {
+    return {
+      slug: null,
+      confidence: best.confidence,
+      reason: `uncertain match (${(best.confidence * 100).toFixed(0)}% < ${US_MATCH_MIN_CONFIDENCE * 100}% threshold) — skip`,
+    };
+  }
+
+  return {
+    slug: null,
+    confidence: best.confidence,
+    reason: "US market inactive or failed verification — skip",
+  };
+}
+
+/** Legacy resolver — prefers stored US slug; avoids global slug translation when possible. */
+export async function resolveUsMarketSlug(market: UsMarketLookup): Promise<string | null> {
+  const match = await resolveUsMarketForExecution(market);
+  return match.slug;
 }
