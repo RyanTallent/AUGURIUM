@@ -1,7 +1,10 @@
 import { prisma } from "@augurium/database";
-import { buildLiveCopyTradeEmbed, getDiscordConfig } from "@augurium/discord";
+import { buildLiveCopyTradeEmbed, buildRiskAlertEmbed, getDiscordConfig } from "@augurium/discord";
 import { queueDiscordEvent } from "./discord-events.js";
-import { dispatchDiscordEvents } from "../engines/discord.js";
+import {
+  dispatchLiveCopyDiscordEvents,
+  skipNonLiveCopyDiscordBacklog,
+} from "./discord-live-copy-dispatch.js";
 
 export async function notifyLiveCopyTrade(input: {
   kind: "submitted" | "blocked" | "closed";
@@ -46,14 +49,37 @@ export async function notifyLiveCopyTrade(input: {
   });
 
   if (status === "PENDING") {
-    const sent = await dispatchDiscordEvents();
+    const sent = await dispatchLiveCopyDiscordEvents();
     console.log(
-      `[discord] live copy ${input.kind} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} immediateDispatchSent=${sent}`,
+      `[discord] ${input.kind === "submitted" ? "TRADE ENTER" : input.kind === "closed" ? "TRADE EXIT" : "TRADE PROBLEM"} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} sent=${sent}`,
     );
     return "queued";
   }
 
   return "skipped";
+}
+
+export async function notifyLiveCopyProblem(input: {
+  key: string;
+  message: string;
+}): Promise<void> {
+  const config = getDiscordConfig(process.env);
+  if (!config.canSend) return;
+
+  const status = await queueDiscordEvent({
+    eventType: "EXECUTION_ERROR",
+    dedupeKey: `copy:live:problem:${input.key}`,
+    title: `TRADE PROBLEM: ${input.message.slice(0, 80)}`,
+    payload: buildRiskAlertEmbed({
+      title: "TRADE PROBLEM",
+      message: input.message,
+      source: "copy:auto-pipeline",
+    }),
+  });
+
+  if (status === "PENDING") {
+    await dispatchLiveCopyDiscordEvents();
+  }
 }
 
 /** On boot: alert Discord for COPY whitelist live positions already on Polymarket US. */
@@ -68,6 +94,8 @@ export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
     );
     return;
   }
+
+  await skipNonLiveCopyDiscordBacklog();
 
   const mirrors = await prisma.copyLiveMirror.findMany({
     where: { status: { in: ["SUBMITTED", "OPEN"] } },
@@ -95,8 +123,8 @@ export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
     else if (result === "already_sent") alreadySent++;
   }
 
-  const flushed = await dispatchDiscordEvents();
+  const flushed = await dispatchLiveCopyDiscordEvents();
   console.log(
-    `[discord] startup COPY whitelist backfill open=${mirrors.length} queued=${queued} alreadySent=${alreadySent} flushed=${flushed}`,
+    `[discord] startup trade alerts open=${mirrors.length} queued=${queued} alreadySent=${alreadySent} sent=${flushed}`,
   );
 }

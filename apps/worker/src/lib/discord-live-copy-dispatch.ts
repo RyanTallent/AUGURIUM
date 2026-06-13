@@ -5,64 +5,46 @@ import {
   sendDiscordWebhook,
   type DiscordEventPayload,
 } from "@augurium/discord";
-import {
-  dispatchLiveCopyDiscordEvents,
-  isLiveCopyOnlyDiscord,
-  LIVE_COPY_DISCORD_PREFIX,
-} from "../lib/discord-live-copy-dispatch.js";
+
+export const LIVE_COPY_DISCORD_PREFIX = "copy:live:";
 
 const BATCH_SIZE = Number(process.env.DISCORD_DISPATCH_BATCH ?? "20");
 const MAX_RETRIES = Number(process.env.DISCORD_MAX_RETRIES ?? "5");
 
-export interface DiscordDispatchSummary {
-  sent: number;
-  failed: number;
-  skipped: number;
-  retried: number;
+export function isLiveCopyOnlyDiscord(): boolean {
+  return process.env.DISCORD_LIVE_COPY_ONLY === "true";
 }
 
-export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
+/** Drop shadow/signal backlog when only trade enter/exit/problem alerts are wanted. */
+export async function skipNonLiveCopyDiscordBacklog(): Promise<number> {
+  if (!isLiveCopyOnlyDiscord()) return 0;
+  const result = await prisma.discordEvent.updateMany({
+    where: {
+      status: { in: ["PENDING", "FAILED"] },
+      OR: [
+        { dedupeKey: null },
+        { NOT: { dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX } } },
+      ],
+    },
+    data: {
+      status: "SKIPPED",
+      errorMessage: "DISCORD_LIVE_COPY_ONLY — trade enter/exit/problem alerts only",
+    },
+  });
+  if (result.count > 0) {
+    console.log(`[discord] skipped ${result.count} non-trade pending alert(s)`);
+  }
+  return result.count;
+}
+
+export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
   const config = getDiscordConfig(process.env);
-  if (isLiveCopyOnlyDiscord() && config.canSend) {
-    const sent = await dispatchLiveCopyDiscordEvents();
-    return { sent, failed: 0, skipped: 0, retried: 0 };
-  }
-
-  let sent = 0;
-  let failed = 0;
-  let skipped = 0;
-  let retried = 0;
-
-  if (!config.canSend) {
-    console.warn(
-      "[discord] Dispatch skipped — set DISCORD_ENABLED=true and DISCORD_WEBHOOK_URL",
-    );
-    const pending = await prisma.discordEvent.findMany({
-      where: { status: "PENDING" },
-      take: BATCH_SIZE,
-    });
-    for (const ev of pending) {
-      await prisma.discordEvent.update({
-        where: { id: ev.id },
-        data: {
-          status: "SKIPPED",
-          errorMessage: config.enabled
-            ? "DISCORD_WEBHOOK_URL missing"
-            : "DISCORD_ENABLED is false",
-        },
-      });
-      skipped++;
-    }
-    return { sent, failed, skipped, retried };
-  }
+  if (!config.canSend) return 0;
 
   const now = new Date();
-  const tradeOnlyFilter = isLiveCopyOnlyDiscord()
-    ? { dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX } }
-    : {};
   const events = await prisma.discordEvent.findMany({
     where: {
-      ...tradeOnlyFilter,
+      dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX },
       OR: [
         { status: "PENDING" },
         {
@@ -76,6 +58,7 @@ export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
     take: BATCH_SIZE,
   });
 
+  let sent = 0;
   for (const ev of events) {
     const payload = ev.payload as unknown as DiscordEventPayload;
     const result = await sendDiscordWebhook(config, payload);
@@ -94,7 +77,6 @@ export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
         where: { id: ev.id },
         data: { status: "SKIPPED", errorMessage: result.errorMessage },
       });
-      skipped++;
       continue;
     }
 
@@ -109,9 +91,7 @@ export async function runDiscordDispatchJob(): Promise<DiscordDispatchSummary> {
         nextRetryAt: retryCount < MAX_RETRIES ? nextRetryAt : null,
       },
     });
-    failed++;
-    retried++;
   }
 
-  return { sent, failed, skipped, retried };
+  return sent;
 }

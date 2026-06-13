@@ -10,9 +10,108 @@ import {
   weekDedupeKey,
 } from "@augurium/discord";
 import { queueDiscordEvent } from "../lib/discord-events.js";
+import { dispatchLiveCopyDiscordEvents } from "../lib/discord-live-copy-dispatch.js";
 
 const RESEARCH_ALPHA_MIN = Number(process.env.DISCORD_RESEARCH_ALPHA_MIN ?? "55");
 const LIVE_COPY_ONLY = process.env.DISCORD_LIVE_COPY_ONLY === "true";
+
+async function enqueueLiveCopyTradeDiscord(base: string): Promise<DiscordEnqueueSummary> {
+  let queued = 0;
+  let skipped = 0;
+
+  const open = await prisma.copyLiveMirror.findMany({
+    where: { status: { in: ["SUBMITTED", "OPEN"] } },
+    include: {
+      trader: { select: { address: true } },
+      market: { select: { title: true } },
+    },
+    orderBy: { submittedAt: "desc" },
+    take: 30,
+  });
+
+  for (const m of open) {
+    const st = await queueDiscordEvent({
+      eventType: "EXECUTION_LIVE",
+      dedupeKey: `copy:live:submitted:${m.id}`,
+      title: `TRADE ENTER: ${m.market.title.slice(0, 48)}`,
+      payload: buildLiveCopyTradeEmbed({
+        kind: "submitted",
+        marketTitle: m.market.title,
+        side: m.side,
+        sizeUsd: m.requestedSizeUsd,
+        entryPrice: m.entryPrice,
+        traderAddress: m.trader.address,
+        providerOrderId: m.providerOrderId,
+        dashboardUrl: `${base}/copy`,
+      }),
+    });
+    if (st === "PENDING") queued++;
+    else skipped++;
+  }
+
+  const since = new Date(Date.now() - 14 * 24 * 3600_000);
+  const closed = await prisma.copyLiveMirror.findMany({
+    where: { status: "CLOSED", closedAt: { gte: since } },
+    include: {
+      trader: { select: { address: true } },
+      market: { select: { title: true } },
+    },
+    orderBy: { closedAt: "desc" },
+    take: 30,
+  });
+
+  for (const m of closed) {
+    const st = await queueDiscordEvent({
+      eventType: "COPY_LIVE_CLOSED",
+      dedupeKey: `copy:live:closed:${m.id}`,
+      title: `TRADE EXIT: ${m.market.title.slice(0, 48)}`,
+      payload: buildLiveCopyTradeEmbed({
+        kind: "closed",
+        marketTitle: m.market.title,
+        side: m.side,
+        sizeUsd: m.requestedSizeUsd,
+        entryPrice: m.entryPrice,
+        traderAddress: m.trader.address,
+        dashboardUrl: `${base}/copy`,
+      }),
+    });
+    if (st === "PENDING") queued++;
+    else skipped++;
+  }
+
+  const blocked = await prisma.copyLiveMirror.findMany({
+    where: { status: "BLOCKED", blockReason: { not: null } },
+    include: {
+      trader: { select: { address: true } },
+      market: { select: { title: true } },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 30,
+  });
+
+  for (const m of blocked) {
+    const st = await queueDiscordEvent({
+      eventType: "EXECUTION_BLOCKED",
+      dedupeKey: `copy:live:blocked:${m.id}`,
+      title: `TRADE PROBLEM: ${m.market.title.slice(0, 48)}`,
+      payload: buildLiveCopyTradeEmbed({
+        kind: "blocked",
+        marketTitle: m.market.title,
+        side: m.side,
+        sizeUsd: m.requestedSizeUsd,
+        entryPrice: m.entryPrice,
+        traderAddress: m.trader.address,
+        blockReason: m.blockReason,
+        dashboardUrl: `${base}/copy`,
+      }),
+    });
+    if (st === "PENDING") queued++;
+    else skipped++;
+  }
+
+  await dispatchLiveCopyDiscordEvents();
+  return { queued, skipped };
+}
 
 export interface DiscordEnqueueSummary {
   queued: number;
@@ -22,6 +121,33 @@ export interface DiscordEnqueueSummary {
 export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
   const config = getDiscordConfig(process.env);
   const base = config.dashboardBaseUrl;
+
+  if (LIVE_COPY_ONLY) {
+    const run = await prisma.ingestionRun.create({
+      data: { source: "discord-enqueue", status: "running" },
+    });
+    try {
+      const summary = await enqueueLiveCopyTradeDiscord(base);
+      await prisma.ingestionRun.update({
+        where: { id: run.id },
+        data: {
+          status: "success",
+          itemCount: summary.queued,
+          finishedAt: new Date(),
+          metadata: { ...summary, liveCopyOnly: true },
+        },
+      });
+      return summary;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await prisma.ingestionRun.update({
+        where: { id: run.id },
+        data: { status: "error", error: message, finishedAt: new Date() },
+      });
+      throw err;
+    }
+  }
+
   let queued = 0;
   let skipped = 0;
 
@@ -30,49 +156,6 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
   });
 
   try {
-    const liveMirrors = await prisma.copyLiveMirror.findMany({
-      where: { status: { in: ["SUBMITTED", "OPEN"] } },
-      include: {
-        trader: { select: { address: true } },
-        market: { select: { title: true } },
-      },
-      orderBy: { submittedAt: "desc" },
-      take: 30,
-    });
-
-    for (const m of liveMirrors) {
-      const st = await queueDiscordEvent({
-        eventType: "EXECUTION_LIVE",
-        dedupeKey: `copy:live:submitted:${m.id}`,
-        title: `Live copy submitted: ${m.market.title.slice(0, 48)}`,
-        payload: buildLiveCopyTradeEmbed({
-          kind: "submitted",
-          marketTitle: m.market.title,
-          side: m.side,
-          sizeUsd: m.requestedSizeUsd,
-          entryPrice: m.entryPrice,
-          traderAddress: m.trader.address,
-          providerOrderId: m.providerOrderId,
-          dashboardUrl: `${base}/copy`,
-        }),
-      });
-      if (st === "PENDING") queued++;
-      else skipped++;
-    }
-
-    if (LIVE_COPY_ONLY) {
-      await prisma.ingestionRun.update({
-        where: { id: run.id },
-        data: {
-          status: "success",
-          itemCount: queued,
-          finishedAt: new Date(),
-          metadata: { queued, skipped, liveCopyOnly: true },
-        },
-      });
-      return { queued, skipped };
-    }
-
     const signalTypes = ["TRADE_NOW", "WATCHLIST"];
     const signals = await prisma.signal.findMany({
       where: {

@@ -170,7 +170,7 @@ services:
       - key: PAPER_COPY_ENABLED
         value: "false"
       - key: WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS
-        value: "540000"
+        value: "300000"
       - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
         value: "true"
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH

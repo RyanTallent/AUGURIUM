@@ -45,7 +45,9 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
     const mirrorAnalytics = await computeCopyMirrorAnalytics();
     const weeklyRisk = await evaluateCopyWeeklyStopLoss();
     const lastTopCopyAddresses = board.topTradersToday.slice(0, 5).map((t) => t.address);
-    await enqueueCopyBoardChangeDiscord(board);
+    if (process.env.DISCORD_LIVE_COPY_ONLY !== "true") {
+      await enqueueCopyBoardChangeDiscord(board);
+    }
     await upsertCopyTradingSnapshot(
       {
         board,

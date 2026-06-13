@@ -223,9 +223,9 @@ export function buildLiveCopyTradeEmbed(input: {
   dashboardUrl: string;
 }): DiscordEventPayload {
   const titleByKind = {
-    submitted: "LIVE COPY — order submitted",
-    blocked: "LIVE COPY — order blocked",
-    closed: "LIVE COPY — mirror closed",
+    submitted: "TRADE ENTER",
+    blocked: "TRADE PROBLEM",
+    closed: "TRADE EXIT",
   } as const;
   const colorByKind = {
     submitted: COLORS.liveCopy,

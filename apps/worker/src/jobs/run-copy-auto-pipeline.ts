@@ -8,6 +8,7 @@ import { syncPositionsFromApi } from "./sync-positions.js";
 import { syncPositionsForCopyTargetsFirst } from "./sync-positions-copy-priority.js";
 import { runCopyPaperJob } from "./run-copy-paper.js";
 import { runCopyLiveJob } from "./run-copy-live.js";
+import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
 const INCLUDE_WALLET_ACTIVITY =
@@ -187,6 +188,10 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await notifyLiveCopyProblem({
+      key: `pipeline:${run.id}`,
+      message: `copy:auto-pipeline failed: ${message}`,
+    });
     await prisma.ingestionRun.update({
       where: { id: run.id },
       data: {
