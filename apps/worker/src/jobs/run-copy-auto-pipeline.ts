@@ -148,9 +148,13 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       `[worker] copy:auto-pipeline copyTraderControl evaluated=${controls.evaluated} enabled=${controls.copyEnabled}`,
     );
 
-    await pipelineStep("rising_wallets", () =>
-      detectRisingWallets(Number(process.env.COPY_RISING_WALLET_LIMIT ?? "25")),
-    );
+    await pipelineStep("rising_wallets", () => {
+      if (usMode) {
+        console.log("[worker] copy:auto-pipeline US mode — skip rising_wallets");
+        return Promise.resolve(0);
+      }
+      return detectRisingWallets(Number(process.env.COPY_RISING_WALLET_LIMIT ?? "25"));
+    });
 
     if (usMode) {
       positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);

@@ -1,4 +1,5 @@
 import { prisma } from "@augurium/database";
+import { usePolymarketScanIntel } from "@augurium/shared";
 import {
   applyRiskToDecision,
   buildTraderTruth,
@@ -26,6 +27,17 @@ export async function refreshCopyTraderControls(): Promise<{
   evaluated: number;
   copyEnabled: number;
 }> {
+  if (usePolymarketScanIntel()) {
+    const [evaluated, copyEnabled] = await Promise.all([
+      prisma.copyTraderControl.count(),
+      prisma.copyTraderControl.count({ where: { enabled: true } }),
+    ]);
+    console.log(
+      `[worker] copy trader controls (PolymarketScan) evaluated=${evaluated} copyEnabled=${copyEnabled}`,
+    );
+    return { evaluated, copyEnabled };
+  }
+
   const pool = copyCandidatePoolSize();
   const traders = await prisma.trader.findMany({
     where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
@@ -78,8 +90,19 @@ export async function refreshCopyTraderControls(): Promise<{
 }
 
 export async function loadTopCopyLeaderIds(): Promise<string[]> {
-  const pool = copyCandidatePoolSize();
   const maxLeaders = copyMaxLeaders();
+
+  if (usePolymarketScanIntel()) {
+    const rows = await prisma.copyTraderControl.findMany({
+      where: { enabled: true },
+      orderBy: [{ copyScore: "desc" }, { evaluatedAt: "desc" }],
+      take: maxLeaders,
+      select: { traderId: true },
+    });
+    return rows.map((r) => r.traderId);
+  }
+
+  const pool = copyCandidatePoolSize();
 
   const traders = await prisma.trader.findMany({
     where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
