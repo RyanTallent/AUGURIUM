@@ -174,6 +174,14 @@ async function reconcileSubmittedMirrors(): Promise<number> {
   return promoted;
 }
 
+function usPortfolioHasOpenPositions(
+  positions: Record<string, { netPosition?: number | string | null }> | undefined,
+): boolean {
+  return Object.values(positions ?? {}).some(
+    (pos) => Math.abs(Number(pos.netPosition ?? 0)) > 0,
+  );
+}
+
 /** Close OPEN mirrors that no longer exist on Polymarket US (manual close, expiry, etc.). */
 async function reconcileStaleOpenMirrors(): Promise<number> {
   const cfg = getExecutionConfig();
@@ -186,6 +194,25 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
   if (rows.length === 0) return 0;
 
   const client = getPolymarketUsClient();
+
+  const portfolio = await client.portfolio.positions();
+  if (!usPortfolioHasOpenPositions(portfolio.positions)) {
+    const bulk = await prisma.copyLiveMirror.updateMany({
+      where: { status: "OPEN" },
+      data: {
+        status: "CLOSED",
+        closedAt: new Date(),
+        blockReason: "reconciled: US portfolio flat",
+      },
+    });
+    if (bulk.count > 0) {
+      console.log(
+        `[worker] live copy bulk-closed ${bulk.count} OPEN mirror(s) — US portfolio has no open positions`,
+      );
+    }
+    return bulk.count;
+  }
+
   let closed = 0;
   for (const m of rows) {
     let slug = m.market.slug?.trim() || null;

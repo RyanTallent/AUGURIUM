@@ -96,15 +96,17 @@ export class PolymarketUsExecutionProvider implements ExecutionProvider {
   async getOpenPositions(): Promise<ProviderPosition[]> {
     const client = getPolymarketUsClient();
     const res = await client.portfolio.positions();
-    return Object.entries(res.positions ?? {}).map(([slug, pos]) => ({
-      id: slug,
-      marketId: slug,
-      side: Number(pos.netPosition) >= 0 ? "LONG" : "SHORT",
-      sizeUsd: Number(pos.cashValue?.value ?? pos.cost?.value ?? 0),
-      entryPrice: 0,
-      currentPrice: 0,
-      status: pos.expired ? "EXPIRED" : "OPEN",
-    }));
+    return Object.entries(res.positions ?? {})
+      .filter(([, pos]) => Math.abs(Number(pos.netPosition ?? 0)) > 0)
+      .map(([slug, pos]) => ({
+        id: slug,
+        marketId: slug,
+        side: Number(pos.netPosition) >= 0 ? "LONG" : "SHORT",
+        sizeUsd: Number(pos.cashValue?.value ?? pos.cost?.value ?? 0),
+        entryPrice: 0,
+        currentPrice: 0,
+        status: pos.expired ? "EXPIRED" : "OPEN",
+      }));
   }
 
   async getOpenOrders(): Promise<ProviderOrder[]> {

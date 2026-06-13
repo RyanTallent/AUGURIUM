@@ -40,8 +40,9 @@ export async function hasUsPositionOnMarket(
   const pos = res.positions?.[marketSlug];
   if (!pos) return { ok: false, sizeUsd: 0 };
   const net = Math.abs(Number(pos.netPosition ?? 0));
+  if (net <= 0) return { ok: false, sizeUsd: 0 };
   const sizeUsd = Number(pos.cashValue?.value ?? pos.cost?.value ?? 0);
-  return { ok: net > 0 || sizeUsd > 0.01, sizeUsd };
+  return { ok: true, sizeUsd };
 }
 
 /** Confirm Polymarket US order actually filled before treating copy as success. */
