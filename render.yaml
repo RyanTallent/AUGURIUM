@@ -191,6 +191,8 @@ services:
         value: "1"
       - key: COPY_WEEKLY_MAX_LOSS_PCT
         value: "0.2"
+      - key: DISCORD_LIVE_COPY_ONLY
+        value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db

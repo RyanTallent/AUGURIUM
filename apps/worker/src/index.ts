@@ -16,6 +16,7 @@ import {
   shouldSkipQueueForMemory,
 } from "./lib/worker-memory.js";
 import { logPolymarketStartupCheck } from "./lib/polymarket-startup-check.js";
+import { ensureLiveCopyDiscordOnStartup } from "./lib/enqueue-live-copy-discord.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
@@ -105,6 +106,7 @@ async function bootstrap(): Promise<void> {
 
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
+  await ensureLiveCopyDiscordOnStartup();
 
   if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
     lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());

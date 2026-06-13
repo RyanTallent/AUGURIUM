@@ -12,6 +12,7 @@ import {
 import { queueDiscordEvent } from "../lib/discord-events.js";
 
 const RESEARCH_ALPHA_MIN = Number(process.env.DISCORD_RESEARCH_ALPHA_MIN ?? "55");
+const LIVE_COPY_ONLY = process.env.DISCORD_LIVE_COPY_ONLY === "true";
 
 export interface DiscordEnqueueSummary {
   queued: number;
@@ -57,6 +58,19 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
       });
       if (st === "PENDING") queued++;
       else skipped++;
+    }
+
+    if (LIVE_COPY_ONLY) {
+      await prisma.ingestionRun.update({
+        where: { id: run.id },
+        data: {
+          status: "success",
+          itemCount: queued,
+          finishedAt: new Date(),
+          metadata: { queued, skipped, liveCopyOnly: true },
+        },
+      });
+      return { queued, skipped };
     }
 
     const signalTypes = ["TRADE_NOW", "WATCHLIST"];
