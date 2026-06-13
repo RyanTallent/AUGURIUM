@@ -44,7 +44,7 @@ async function reconcileSubmittedMirrors(): Promise<number> {
     if (pos.ok) {
       await prisma.copyLiveMirror.update({
         where: { id: m.id },
-        data: { status: "OPEN" },
+        data: { status: "OPEN", openedAt: new Date() },
       });
       promoted++;
     }
@@ -385,6 +385,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
             status: "OPEN",
             providerOrderId: result.providerOrderId ?? null,
             submittedAt: new Date(),
+            openedAt: new Date(),
             entryPrice,
             requestedSizeUsd: filledUsd,
             blockReason: null,

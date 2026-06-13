@@ -183,6 +183,7 @@ export class PolymarketUsExecutionProvider implements ExecutionProvider {
         response.id,
         marketSlug,
         response.executions as Parameters<typeof verifyUsOrderFill>[3],
+        useMarketOrders(),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "placeOrder failed";

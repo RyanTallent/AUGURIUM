@@ -1,11 +1,6 @@
 import type { PolymarketUS } from "polymarket-us";
 import type { OrderResult } from "./types.js";
 
-const FILLED_STATES = new Set([
-  "ORDER_STATE_FILLED",
-  "ORDER_STATE_PARTIALLY_FILLED",
-]);
-
 const DEAD_STATES = new Set([
   "ORDER_STATE_REJECTED",
   "ORDER_STATE_CANCELED",
@@ -55,6 +50,7 @@ export async function verifyUsOrderFill(
   orderId: string,
   marketSlug: string,
   createExecutions?: UsExecution[],
+  requireFullFill = false,
 ): Promise<OrderResult> {
   let order: UsOrder | undefined = createExecutions?.find((e) => e.order)?.order;
 
@@ -76,13 +72,24 @@ export async function verifyUsOrderFill(
   const filledUsd = filledUsdFromOrder(order);
   const fillPrice = Number(order.avgPx?.value ?? order.price?.value ?? 0);
   const executionFill = hasFillExecution(createExecutions);
-  const position = await hasUsPositionOnMarket(client, marketSlug);
 
-  const orderFilled =
-    (FILLED_STATES.has(order.state) && cumQty > 0) || (executionFill && cumQty > 0);
+  const fullyFilled = order.state === "ORDER_STATE_FILLED" && cumQty > 0;
+  const partiallyFilled =
+    order.state === "ORDER_STATE_PARTIALLY_FILLED" && cumQty > 0 && (executionFill || cumQty > 0);
+  const orderFilled = requireFullFill
+    ? fullyFilled
+    : fullyFilled || partiallyFilled || (executionFill && cumQty > 0);
 
-  if (orderFilled || position.ok) {
-    const sizeUsd = filledUsd > 0 ? filledUsd : position.sizeUsd;
+  let positionOk = false;
+  let positionSizeUsd = 0;
+  if (!orderFilled) {
+    const position = await hasUsPositionOnMarket(client, marketSlug);
+    positionOk = position.ok;
+    positionSizeUsd = position.sizeUsd;
+  }
+
+  if (orderFilled || (!requireFullFill && positionOk)) {
+    const sizeUsd = filledUsd > 0 ? filledUsd : positionSizeUsd;
     return {
       success: true,
       providerOrderId: orderId,
@@ -94,14 +101,18 @@ export async function verifyUsOrderFill(
   }
 
   const rejectReason = createExecutions?.find((e) => e.orderRejectReason)?.orderRejectReason;
-  const stateMsg = DEAD_STATES.has(order.state)
-    ? `order ${order.state}`
-    : `order not filled (state=${order.state})`;
+  const stateMsg = requireFullFill && order.state === "ORDER_STATE_PARTIALLY_FILLED"
+    ? "market FOK order partially filled (treated as failure)"
+    : DEAD_STATES.has(order.state)
+      ? `order ${order.state}`
+      : `order not filled (state=${order.state})`;
 
   return {
     success: false,
     providerOrderId: orderId,
     status: DEAD_STATES.has(order.state) ? "FAILED" : "CANCELLED",
-    errorMessage: rejectReason ? `${stateMsg}: ${rejectReason}` : `${stateMsg} — no position on Polymarket US`,
+    errorMessage: rejectReason
+      ? `${stateMsg}: ${rejectReason}`
+      : `${stateMsg} — no verified fill on Polymarket US`,
   };
 }

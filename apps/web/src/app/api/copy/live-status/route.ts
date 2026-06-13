@@ -5,13 +5,22 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [byStatus, recentSubmitted, recentBlocked, latestPipeline] = await Promise.all([
+    const [byStatus, recentOpen, recentSubmitted, recentBlocked, latestPipeline] = await Promise.all([
       prisma.copyLiveMirror.groupBy({
         by: ["status"],
         _count: true,
       }),
       prisma.copyLiveMirror.findMany({
-        where: { status: { in: ["SUBMITTED", "OPEN"] } },
+        where: { status: "OPEN" },
+        orderBy: { openedAt: "desc" },
+        take: 10,
+        include: {
+          trader: { select: { address: true } },
+          market: { select: { title: true, slug: true } },
+        },
+      }),
+      prisma.copyLiveMirror.findMany({
+        where: { status: "SUBMITTED" },
         orderBy: { submittedAt: "desc" },
         take: 10,
         include: {
@@ -40,23 +49,37 @@ export async function GET() {
         ? (latestPipeline.metadata as Record<string, unknown>)
         : null;
 
+    const mapMirror = (m: {
+      id: string;
+      status: string;
+      requestedSizeUsd: number;
+      entryPrice: number;
+      providerOrderId: string | null;
+      submittedAt: Date | null;
+      openedAt: Date;
+      side: string;
+      trader: { address: string };
+      market: { title: string; slug: string };
+    }) => ({
+      id: m.id,
+      status: m.status,
+      marketTitle: m.market.title,
+      marketSlug: m.market.slug,
+      side: m.side,
+      sizeUsd: m.requestedSizeUsd,
+      entryPrice: m.entryPrice,
+      traderAddress: m.trader.address,
+      providerOrderId: m.providerOrderId,
+      submittedAt: m.submittedAt,
+      openedAt: m.openedAt,
+    });
+
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
       statusCounts,
-      hasLiveTrade: recentSubmitted.length > 0,
-      submittedMirrors: recentSubmitted.map((m) => ({
-        id: m.id,
-        status: m.status,
-        marketTitle: m.market.title,
-        marketSlug: m.market.slug,
-        side: m.side,
-        sizeUsd: m.requestedSizeUsd,
-        entryPrice: m.entryPrice,
-        traderAddress: m.trader.address,
-        providerOrderId: m.providerOrderId,
-        submittedAt: m.submittedAt,
-        openedAt: m.openedAt,
-      })),
+      hasLiveTrade: recentOpen.length > 0,
+      openMirrors: recentOpen.map(mapMirror),
+      submittedMirrors: recentSubmitted.map(mapMirror),
       recentBlocked: recentBlocked.map((m) => ({
         marketTitle: m.market.title,
         side: m.side,
