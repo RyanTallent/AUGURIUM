@@ -139,6 +139,7 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
         opened: s.paperOpened,
         closed: s.paperClosed,
         liveReady: s.liveReady,
+        mirrorsSubmitted: s.mirrorsSubmitted,
         durationMs: s.durationMs,
       };
     }

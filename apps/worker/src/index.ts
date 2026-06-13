@@ -112,10 +112,8 @@ async function bootstrap(): Promise<void> {
 
   if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
     lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());
-    console.log("[worker] kicking off copy:auto-pipeline after snapshot refresh");
-    void executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval").catch((err) =>
-      console.error("[worker] copy:auto-pipeline bootstrap error", err),
-    );
+    console.log("[worker] running copy:auto-pipeline after snapshot refresh");
+    await executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval");
   }
 
   setInterval(() => {
