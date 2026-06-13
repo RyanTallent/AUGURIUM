@@ -127,6 +127,16 @@ export async function runExecutionEngineJob(): Promise<ExecutionEngineSummary> {
       return summary;
     }
 
+    if (
+      cfg.provider === "polymarket-us" &&
+      process.env.EXECUTION_ENGINE_LIVE_US_ENABLED !== "true"
+    ) {
+      summary.message =
+        "US signal execution engine disabled — live copy pipeline is the only US order path";
+      await finishRun(run.id, summary);
+      return summary;
+    }
+
     const paperStore = new PrismaPaperStore();
     const provider = buildProvider(cfg.provider);
     const locks = new PrismaLockStore();

@@ -169,6 +169,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
           deployedUsd: live.deployedUsd,
           tradeSizeUsd: live.tradeSizeUsd,
           bankrollSource: live.bankrollSource,
+          usOpenPositions: live.usOpenPositions,
         } as object,
       },
     });

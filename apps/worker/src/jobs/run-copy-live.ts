@@ -186,6 +186,7 @@ export interface CopyLiveJobSummary {
   deployedUsd: number | null;
   tradeSizeUsd: number | null;
   bankrollSource: string | null;
+  usOpenPositions: Array<{ id: string; marketId: string; side: string; sizeUsd: number }>;
   blockers: string[];
   message: string;
 }
@@ -269,6 +270,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       mirrorsSubmitted: 0,
       mirrorsClosed: 0,
       ...emptySizing,
+      usOpenPositions: [],
       blockers: readiness.blockers,
       message: "LIVE_COPY_ENABLED is false",
     };
@@ -617,6 +619,10 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         asset: tokenId,
       });
 
+      console.log(
+        `[worker] live copy order mirror=${mirror.id} slug=${tokenId} title="${mirror.market.title}" success=${result.success} orderId=${result.providerOrderId ?? "none"}`,
+      );
+
       if (result.success) {
         const filledUsd = result.filledSizeUsd ?? orderSizeUsd;
         const entryPrice = result.fillPrice ?? mirror.entryPrice;
@@ -675,6 +681,27 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     ).map((r) => ({ usd: r.requestedSizeUsd })),
   );
 
+  let usOpenPositions: CopyLiveJobSummary["usOpenPositions"] = [];
+  if (provider && cfg.provider === "polymarket-us") {
+    try {
+      const rows = await provider.getOpenPositions();
+      usOpenPositions = rows.map((r) => ({
+        id: r.id,
+        marketId: r.marketId,
+        side: r.side,
+        sizeUsd: r.sizeUsd,
+      }));
+      if (usOpenPositions.length > 0) {
+        console.log(
+          `[worker] live copy US open positions (${usOpenPositions.length}): ${usOpenPositions.map((p) => `${p.id} $${p.sizeUsd.toFixed(2)}`).join("; ")}`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[worker] live copy US position sync failed: ${message}`);
+    }
+  }
+
   return {
     enabled: true,
     ready: readiness.ready,
@@ -687,6 +714,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     deployedUsd: finalDeployed,
     tradeSizeUsd,
     bankrollSource: bankroll.source,
+    usOpenPositions,
     blockers: readiness.blockers,
     message: blockReason
       ? `live copy blocked: ${blockReason}`

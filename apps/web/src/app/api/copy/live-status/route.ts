@@ -90,6 +90,14 @@ export async function GET() {
             bankrollSource: pipelineMeta?.bankrollSource ?? null,
           }
         : null,
+      usOpenPositions: Array.isArray(pipelineMeta?.usOpenPositions)
+        ? (pipelineMeta.usOpenPositions as Array<{
+            id: string;
+            marketId: string;
+            side: string;
+            sizeUsd: number;
+          }>)
+        : [],
       recentBlocked: recentBlocked.map((m) => ({
         marketTitle: m.market.title,
         side: m.side,
@@ -110,6 +118,7 @@ export async function GET() {
             deployedUsd: pipelineMeta?.deployedUsd ?? null,
             tradeSizeUsd: pipelineMeta?.tradeSizeUsd ?? null,
             bankrollSource: pipelineMeta?.bankrollSource ?? null,
+            usOpenPositions: pipelineMeta?.usOpenPositions ?? null,
             lite: pipelineMeta?.lite ?? null,
           }
         : null,
