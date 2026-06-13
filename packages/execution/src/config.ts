@@ -12,6 +12,8 @@ export interface ExecutionConfig {
   hasApiSecret: boolean;
   hasApiPassphrase: boolean;
   hasFunderAddress: boolean;
+  hasUsKeyId: boolean;
+  hasUsSecretKey: boolean;
 }
 
 function envFlag(name: string): boolean {
@@ -22,7 +24,9 @@ function envFlag(name: string): boolean {
 export function getExecutionConfig(): ExecutionConfig {
   const provider = (process.env.EXECUTION_PROVIDER ?? "paper").toLowerCase() as ExecutionProviderName;
   const normalized: ExecutionProviderName =
-    provider === "polymarket" || provider === "replay" ? provider : "paper";
+    provider === "polymarket" || provider === "polymarket-us" || provider === "replay"
+      ? provider
+      : "paper";
 
   return {
     executionEnabled: envFlag("EXECUTION_ENABLED"),
@@ -36,6 +40,8 @@ export function getExecutionConfig(): ExecutionConfig {
     hasApiSecret: Boolean(process.env.POLYMARKET_API_SECRET?.trim()),
     hasApiPassphrase: Boolean(process.env.POLYMARKET_API_PASSPHRASE?.trim()),
     hasFunderAddress: Boolean(process.env.POLYMARKET_FUNDER_ADDRESS?.trim()),
+    hasUsKeyId: Boolean(process.env.POLYMARKET_US_KEY_ID?.trim()),
+    hasUsSecretKey: Boolean(process.env.POLYMARKET_US_SECRET_KEY?.trim()),
   };
 }
 
@@ -43,7 +49,7 @@ export function getExecutionConfig(): ExecutionConfig {
 export function isLivePolymarketEnabled(cfg: ExecutionConfig): boolean {
   return (
     cfg.executionEnabled &&
-    cfg.provider === "polymarket" &&
+    (cfg.provider === "polymarket" || cfg.provider === "polymarket-us") &&
     cfg.liveTradingEnabled &&
     cfg.allowRealMoney
   );

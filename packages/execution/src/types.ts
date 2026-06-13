@@ -1,4 +1,4 @@
-export type ExecutionProviderName = "paper" | "polymarket" | "replay";
+export type ExecutionProviderName = "paper" | "polymarket" | "polymarket-us" | "replay";
 
 export type ExecutionMode = "PAPER" | "LIVE" | "REPLAY";
 

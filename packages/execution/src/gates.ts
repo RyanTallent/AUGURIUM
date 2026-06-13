@@ -13,7 +13,7 @@ export function evaluateExecutionGates(input: GateCheckInput): GateCheckResult {
     reasons.push("paper execution not enabled");
   }
 
-  if (cfg.provider === "polymarket") {
+  if (cfg.provider === "polymarket" || cfg.provider === "polymarket-us") {
     if (!isLivePolymarketEnabled(cfg)) {
       reasons.push("live Polymarket requires LIVE_TRADING_ENABLED and ALLOW_REAL_MONEY");
     }
@@ -77,6 +77,7 @@ export function executionModeLabel(cfg = getExecutionConfig()): string {
   if (!cfg.executionEnabled) return "DISABLED";
   if (cfg.provider === "paper") return "PAPER";
   if (cfg.provider === "replay") return "REPLAY";
+  if (cfg.provider === "polymarket-us" && isLivePolymarketEnabled(cfg)) return "LIVE_US";
   if (isLivePolymarketEnabled(cfg)) return "LIVE";
   return "BLOCKED";
 }

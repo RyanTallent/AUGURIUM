@@ -54,12 +54,12 @@ envVarGroups:
       - key: EXECUTION_ENABLED
         value: "true"
       - key: EXECUTION_PROVIDER
-        value: polymarket
+        value: polymarket-us
       - key: LIVE_TRADING_ENABLED
         value: "true"
       - key: ALLOW_REAL_MONEY
         value: "true"
-      - key: POLYMARKET_CLOB_READY
+      - key: POLYMARKET_US_READY
         value: "true"
       - key: LIVE_COPY_SKIP_SYSTEM_READINESS
         value: "true"
@@ -82,6 +82,10 @@ envVarGroups:
       - key: POLYMARKET_API_PASSPHRASE
         sync: false
       - key: POLYMARKET_FUNDER_ADDRESS
+        sync: false
+      - key: POLYMARKET_US_KEY_ID
+        sync: false
+      - key: POLYMARKET_US_SECRET_KEY
         sync: false
 
 services:

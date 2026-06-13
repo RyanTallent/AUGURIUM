@@ -15,6 +15,8 @@ import {
   createExecutionProvider,
   getExecutionConfig,
   isLivePolymarketEnabled,
+  isPolymarketUsReady,
+  resolveUsMarketSlug,
 } from "@augurium/execution";
 
 const LIVE_BANKROLL = Number(
@@ -226,33 +228,65 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     mirrorsClosed++;
   }
 
-  if (readiness.ready && isPolymarketClobReady() && isLivePolymarketEnabled(getExecutionConfig())) {
+  if (readiness.ready && isLivePolymarketEnabled(getExecutionConfig())) {
+    const cfg = getExecutionConfig();
+    const executionReady =
+      cfg.provider === "polymarket-us" ? isPolymarketUsReady() : isPolymarketClobReady();
+    if (!executionReady) {
+      return {
+        enabled: true,
+        ready: readiness.ready,
+        mirrorsPending,
+        mirrorsBlocked,
+        mirrorsSubmitted,
+        mirrorsClosed,
+        blockers: readiness.blockers,
+        message: "live copy: execution provider not ready",
+      };
+    }
+
     const provider = createExecutionProvider();
     const pending = await prisma.copyLiveMirror.findMany({
       where: { status: "PENDING" },
       take: 5,
       include: {
-        market: { select: { clobTokenIds: true, conditionId: true } },
+        market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true } },
       },
     });
 
     for (const mirror of pending) {
-      const pos = await prisma.position.findUnique({
-        where: { externalKey: mirror.sourcePositionKey },
-        select: { asset: true },
-      });
-      const tokenId =
-        pos?.asset ??
-        mirror.market.clobTokenIds?.[0] ??
-        null;
+      let tokenId: string | null = null;
 
-      if (!tokenId) {
-        await prisma.copyLiveMirror.update({
-          where: { id: mirror.id },
-          data: { status: "BLOCKED", blockReason: "no CLOB token id for market" },
+      if (cfg.provider === "polymarket-us") {
+        tokenId = await resolveUsMarketSlug({
+          slug: mirror.market.slug,
+          title: mirror.market.title,
         });
-        mirrorsBlocked++;
-        continue;
+        if (!tokenId) {
+          await prisma.copyLiveMirror.update({
+            where: { id: mirror.id },
+            data: {
+              status: "BLOCKED",
+              blockReason: "no matching Polymarket US market slug",
+            },
+          });
+          mirrorsBlocked++;
+          continue;
+        }
+      } else {
+        const pos = await prisma.position.findUnique({
+          where: { externalKey: mirror.sourcePositionKey },
+          select: { asset: true },
+        });
+        tokenId = pos?.asset ?? mirror.market.clobTokenIds?.[0] ?? null;
+        if (!tokenId) {
+          await prisma.copyLiveMirror.update({
+            where: { id: mirror.id },
+            data: { status: "BLOCKED", blockReason: "no CLOB token id for market" },
+          });
+          mirrorsBlocked++;
+          continue;
+        }
       }
 
       const result = await provider.placeOrder({
