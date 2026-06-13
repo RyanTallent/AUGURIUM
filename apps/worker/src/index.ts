@@ -93,6 +93,9 @@ async function bootstrap(): Promise<void> {
 
   await redis.ping();
   console.log("[worker] redis connected");
+  console.log(
+    `[worker] copy auto pipeline: ${process.env.COPY_AUTO_PIPELINE_ENABLED === "true" ? "ENABLED" : "DISABLED"}`,
+  );
 
   const orphaned = await markOrphanedShadowPortfolioRuns();
   if (orphaned > 0) {

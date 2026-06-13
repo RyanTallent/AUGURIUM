@@ -76,6 +76,8 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
   if (!ENABLED) {
 
+    console.warn("[worker] copy:auto-pipeline disabled — set COPY_AUTO_PIPELINE_ENABLED=true");
+
     return {
 
       enabled: false,
@@ -115,6 +117,10 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     data: { source: "copy:auto-pipeline", status: "running" },
 
   });
+
+
+
+  console.log("[worker] copy:auto-pipeline started");
 
 
 
@@ -176,7 +182,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
 
 
-    const message = `auto copy: trades=${tradesIngested} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${paperCopyEnabled} paper+${paperOpened}/-${paperClosed} liveReady=${liveReady}`;
+    const message = `auto copy: trades=${tradesIngested} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${paperCopyEnabled} paper+${paperOpened}/-${paperClosed} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${live.mirrorsSubmitted}`;
 
     await prisma.ingestionRun.update({
 

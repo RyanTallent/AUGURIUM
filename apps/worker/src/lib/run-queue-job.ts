@@ -131,6 +131,7 @@ export async function runQueueJob(queue: string): Promise<JobCounts> {
       const s = await runCopyAutoPipelineJob();
       return {
         enabled: s.enabled,
+        message: s.message,
         tradesIngested: s.tradesIngested,
         walletActivity: s.walletActivityIngested,
         tradersScored: s.tradersScored,
