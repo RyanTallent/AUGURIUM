@@ -62,6 +62,7 @@ const LIVE_BANKROLL = Number(
 );
 const ENABLED = process.env.LIVE_COPY_ENABLED === "true";
 const USE_PAPER_SOURCE = process.env.LIVE_COPY_USE_PAPER_SOURCE === "true";
+const CLOSE_ON_LEADER_EXIT = process.env.LIVE_COPY_CLOSE_ON_EXIT !== "false";
 
 export interface CopyLiveJobSummary {
   enabled: boolean;
@@ -253,39 +254,28 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   }
 
   const sourceKeys = new Set(sources.map((s) => s.sourcePositionKey));
-  const openMirrors = await prisma.copyLiveMirror.findMany({
+  const activeMirrors = await prisma.copyLiveMirror.findMany({
     where: { status: { in: ["PENDING", "SUBMITTED", "OPEN"] } },
     include: {
       trader: { select: { address: true } },
-      market: { select: { title: true } },
+      market: { select: { title: true, slug: true } },
     },
   });
-
-  for (const m of openMirrors) {
-    if (sourceKeys.has(m.sourcePositionKey)) continue;
-    await prisma.copyLiveMirror.update({
-      where: { id: m.id },
-      data: { status: "CLOSED", closedAt: new Date() },
-    });
-    mirrorsClosed++;
-    if (m.status === "SUBMITTED" || m.status === "OPEN") {
-      await notifyLiveCopyTrade({
-        kind: "closed",
-        mirrorId: m.id,
-        marketTitle: m.market.title,
-        side: m.side,
-        sizeUsd: m.requestedSizeUsd,
-        entryPrice: m.entryPrice,
-        traderAddress: m.trader.address,
-      });
-    }
-  }
+  const mirrorsToExit = activeMirrors.filter((m) => !sourceKeys.has(m.sourcePositionKey));
 
   if (readiness.ready && isLivePolymarketEnabled(getExecutionConfig())) {
     const cfg = getExecutionConfig();
     const executionReady =
       cfg.provider === "polymarket-us" ? isPolymarketUsReady() : isPolymarketClobReady();
     if (!executionReady) {
+      for (const m of mirrorsToExit) {
+        if (m.status === "OPEN") continue;
+        await prisma.copyLiveMirror.update({
+          where: { id: m.id },
+          data: { status: "CLOSED", closedAt: new Date() },
+        });
+        mirrorsClosed++;
+      }
       return {
         enabled: true,
         ready: readiness.ready,
@@ -300,6 +290,76 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
 
     const provider = createExecutionProvider();
     await reconcileSubmittedMirrors();
+
+    const client = cfg.provider === "polymarket-us" ? getPolymarketUsClient() : null;
+    for (const m of mirrorsToExit) {
+      let exitOk = true;
+      if (
+        m.status === "OPEN" &&
+        CLOSE_ON_LEADER_EXIT &&
+        cfg.provider === "polymarket-us" &&
+        client
+      ) {
+        const slug = await resolveUsMarketSlug({
+          slug: m.market.slug,
+          title: m.market.title,
+        });
+        if (slug) {
+          const before = await hasUsPositionOnMarket(client, slug);
+          if (before.ok) {
+            console.log(`[worker] live copy exit leader closed — closing US position slug=${slug}`);
+            const closeResult = await provider.closePosition(slug);
+            if (!closeResult.success) {
+              exitOk = false;
+              await notifyLiveCopyTrade({
+                kind: "blocked",
+                mirrorId: m.id,
+                marketTitle: m.market.title,
+                side: m.side,
+                sizeUsd: m.requestedSizeUsd,
+                entryPrice: m.entryPrice,
+                traderAddress: m.trader.address,
+                blockReason: `exit failed: ${closeResult.errorMessage ?? "closePosition failed"}`,
+              });
+            } else {
+              const after = await hasUsPositionOnMarket(client, slug);
+              if (after.ok) {
+                exitOk = false;
+                await notifyLiveCopyTrade({
+                  kind: "blocked",
+                  mirrorId: m.id,
+                  marketTitle: m.market.title,
+                  side: m.side,
+                  sizeUsd: m.requestedSizeUsd,
+                  entryPrice: m.entryPrice,
+                  traderAddress: m.trader.address,
+                  blockReason: "exit submitted but Polymarket US position still open",
+                });
+              }
+            }
+          }
+        }
+      }
+
+      if (!exitOk) continue;
+
+      await prisma.copyLiveMirror.update({
+        where: { id: m.id },
+        data: { status: "CLOSED", closedAt: new Date() },
+      });
+      mirrorsClosed++;
+      if (m.status === "OPEN" || m.status === "SUBMITTED") {
+        await notifyLiveCopyTrade({
+          kind: "closed",
+          mirrorId: m.id,
+          marketTitle: m.market.title,
+          side: m.side,
+          sizeUsd: m.requestedSizeUsd,
+          entryPrice: m.entryPrice,
+          traderAddress: m.trader.address,
+        });
+      }
+    }
 
     const pending = await prisma.copyLiveMirror.findMany({
       where: { status: "PENDING" },
@@ -435,6 +495,6 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     blockers: readiness.blockers,
     message: blockReason
       ? `live copy blocked: ${blockReason}`
-      : `live copy: pending=${mirrorsPending} submitted=${mirrorsSubmitted}`,
+      : `live copy: pending=${mirrorsPending} opened=${mirrorsSubmitted} closed=${mirrorsClosed}`,
   };
 }

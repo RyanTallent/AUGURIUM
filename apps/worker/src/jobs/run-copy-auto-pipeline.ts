@@ -56,7 +56,7 @@ async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** One tick (~9 min): scan Polymarket → refresh COPY wallets → rescore → sync → live copy. */
+/** Every ~5 min: scan → score COPY wallets → sync → verified live buy/sell. */
 export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary> {
   const started = Date.now();
 

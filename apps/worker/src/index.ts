@@ -98,6 +98,11 @@ async function bootstrap(): Promise<void> {
   console.log(
     `[worker] copy auto pipeline: ${process.env.COPY_AUTO_PIPELINE_ENABLED === "true" ? "ENABLED" : "DISABLED"}`,
   );
+  if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
+    console.log(
+      `[worker] copy auto pipeline interval ms: ${getQueueIntervalMs(QUEUES.COPY_AUTO_PIPELINE)}`,
+    );
+  }
 
   const orphaned = await markOrphanedShadowPortfolioRuns();
   if (orphaned > 0) {
