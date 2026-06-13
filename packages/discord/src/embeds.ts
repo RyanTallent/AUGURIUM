@@ -212,7 +212,7 @@ export function buildWeeklyReportEmbed(input: {
 }
 
 export function buildLiveCopyTradeEmbed(input: {
-  kind: "submitted" | "blocked" | "closed";
+  kind: "filled" | "blocked" | "closed";
   marketTitle: string;
   side: string;
   sizeUsd: number;
@@ -223,12 +223,12 @@ export function buildLiveCopyTradeEmbed(input: {
   dashboardUrl: string;
 }): DiscordEventPayload {
   const titleByKind = {
-    submitted: "TRADE ENTER",
+    filled: "TRADE ENTER",
     blocked: "TRADE PROBLEM",
     closed: "TRADE EXIT",
   } as const;
   const colorByKind = {
-    submitted: COLORS.liveCopy,
+    filled: COLORS.liveCopy,
     blocked: COLORS.liveBlocked,
     closed: COLORS.liveClosed,
   } as const;
@@ -236,7 +236,10 @@ export function buildLiveCopyTradeEmbed(input: {
 
   return liveCopyPayload({
     title: titleByKind[input.kind],
-    description: `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
+    description:
+      input.kind === "filled"
+        ? `Position opened on Polymarket US (verified fill) · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
+        : `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
     color: colorByKind[input.kind],
     url: input.dashboardUrl,
     fields: [

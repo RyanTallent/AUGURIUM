@@ -5,6 +5,7 @@ import {
   isPolymarketUsReady,
   validatePolymarketUsConnection,
 } from "./polymarket-us-client.js";
+import { verifyUsOrderFill } from "./polymarket-us-order-verify.js";
 import { safeLogMessage } from "./redact.js";
 import type {
   CredentialValidation,
@@ -169,14 +170,20 @@ export class PolymarketUsExecutionProvider implements ExecutionProvider {
       };
 
       const response = await client.orders.create(params);
-      const ok = Boolean(response.id);
-      return {
-        success: ok,
-        providerOrderId: response.id,
-        status: ok ? "SUBMITTED" : "FAILED",
-        filledSizeUsd: ok ? request.requestedSizeUsd : 0,
-        errorMessage: ok ? undefined : "US order rejected",
-      };
+      if (!response.id) {
+        return {
+          success: false,
+          status: "FAILED",
+          errorMessage: "US order rejected (no order id)",
+        };
+      }
+
+      return verifyUsOrderFill(
+        client,
+        response.id,
+        marketSlug,
+        response.executions as Parameters<typeof verifyUsOrderFill>[3],
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "placeOrder failed";
       return {

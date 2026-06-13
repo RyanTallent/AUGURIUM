@@ -19,36 +19,6 @@ async function enqueueLiveCopyTradeDiscord(base: string): Promise<DiscordEnqueue
   let queued = 0;
   let skipped = 0;
 
-  const open = await prisma.copyLiveMirror.findMany({
-    where: { status: { in: ["SUBMITTED", "OPEN"] } },
-    include: {
-      trader: { select: { address: true } },
-      market: { select: { title: true } },
-    },
-    orderBy: { submittedAt: "desc" },
-    take: 30,
-  });
-
-  for (const m of open) {
-    const st = await queueDiscordEvent({
-      eventType: "EXECUTION_LIVE",
-      dedupeKey: `copy:live:submitted:${m.id}`,
-      title: `TRADE ENTER: ${m.market.title.slice(0, 48)}`,
-      payload: buildLiveCopyTradeEmbed({
-        kind: "submitted",
-        marketTitle: m.market.title,
-        side: m.side,
-        sizeUsd: m.requestedSizeUsd,
-        entryPrice: m.entryPrice,
-        traderAddress: m.trader.address,
-        providerOrderId: m.providerOrderId,
-        dashboardUrl: `${base}/copy`,
-      }),
-    });
-    if (st === "PENDING") queued++;
-    else skipped++;
-  }
-
   const since = new Date(Date.now() - 14 * 24 * 3600_000);
   const closed = await prisma.copyLiveMirror.findMany({
     where: { status: "CLOSED", closedAt: { gte: since } },

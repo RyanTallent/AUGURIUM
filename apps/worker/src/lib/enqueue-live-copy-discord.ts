@@ -7,7 +7,7 @@ import {
 } from "./discord-live-copy-dispatch.js";
 
 export async function notifyLiveCopyTrade(input: {
-  kind: "submitted" | "blocked" | "closed";
+  kind: "filled" | "blocked" | "closed";
   mirrorId: string;
   marketTitle: string;
   side: string;
@@ -24,14 +24,16 @@ export async function notifyLiveCopyTrade(input: {
   }
 
   const eventType =
-    input.kind === "submitted"
+    input.kind === "filled"
       ? "EXECUTION_LIVE"
       : input.kind === "blocked"
         ? "EXECUTION_BLOCKED"
         : "COPY_LIVE_CLOSED";
 
+  const dedupeKey = `copy:live:${input.kind}:${input.mirrorId}`;
+
   const existing = await prisma.discordEvent.findUnique({
-    where: { dedupeKey: `copy:live:${input.kind}:${input.mirrorId}` },
+    where: { dedupeKey },
     select: { status: true },
   });
   if (existing?.status === "SENT") {
@@ -40,8 +42,13 @@ export async function notifyLiveCopyTrade(input: {
 
   const status = await queueDiscordEvent({
     eventType,
-    dedupeKey: `copy:live:${input.kind}:${input.mirrorId}`,
-    title: `Live copy ${input.kind}: ${input.marketTitle.slice(0, 48)}`,
+    dedupeKey,
+    title:
+      input.kind === "filled"
+        ? `TRADE ENTER: ${input.marketTitle.slice(0, 48)}`
+        : input.kind === "closed"
+          ? `TRADE EXIT: ${input.marketTitle.slice(0, 48)}`
+          : `TRADE PROBLEM: ${input.marketTitle.slice(0, 48)}`,
     payload: buildLiveCopyTradeEmbed({
       ...input,
       dashboardUrl: `${config.dashboardBaseUrl}/copy`,
@@ -51,7 +58,7 @@ export async function notifyLiveCopyTrade(input: {
   if (status === "PENDING") {
     const sent = await dispatchLiveCopyDiscordEvents();
     console.log(
-      `[discord] ${input.kind === "submitted" ? "TRADE ENTER" : input.kind === "closed" ? "TRADE EXIT" : "TRADE PROBLEM"} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} sent=${sent}`,
+      `[discord] ${input.kind === "filled" ? "TRADE ENTER" : input.kind === "closed" ? "TRADE EXIT" : "TRADE PROBLEM"} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} sent=${sent}`,
     );
     return "queued";
   }
@@ -82,7 +89,7 @@ export async function notifyLiveCopyProblem(input: {
   }
 }
 
-/** On boot: alert Discord for COPY whitelist live positions already on Polymarket US. */
+/** Startup: configure Discord and clear non-trade backlog — no ENTER re-alerts on redeploy. */
 export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
   const config = getDiscordConfig(process.env);
   console.log(
@@ -95,36 +102,8 @@ export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
     return;
   }
 
-  await skipNonLiveCopyDiscordBacklog();
-
-  const mirrors = await prisma.copyLiveMirror.findMany({
-    where: { status: { in: ["SUBMITTED", "OPEN"] } },
-    include: {
-      trader: { select: { address: true } },
-      market: { select: { title: true } },
-    },
-    orderBy: { submittedAt: "desc" },
-  });
-
-  let queued = 0;
-  let alreadySent = 0;
-  for (const m of mirrors) {
-    const result = await notifyLiveCopyTrade({
-      kind: "submitted",
-      mirrorId: m.id,
-      marketTitle: m.market.title,
-      side: m.side,
-      sizeUsd: m.requestedSizeUsd,
-      entryPrice: m.entryPrice,
-      traderAddress: m.trader.address,
-      providerOrderId: m.providerOrderId,
-    });
-    if (result === "queued") queued++;
-    else if (result === "already_sent") alreadySent++;
-  }
-
-  const flushed = await dispatchLiveCopyDiscordEvents();
+  const skipped = await skipNonLiveCopyDiscordBacklog();
   console.log(
-    `[discord] startup trade alerts open=${mirrors.length} queued=${queued} alreadySent=${alreadySent} sent=${flushed}`,
+    `[discord] startup — ENTER alerts only on new verified fills (skipped ${skipped} non-trade backlog)`,
   );
 }

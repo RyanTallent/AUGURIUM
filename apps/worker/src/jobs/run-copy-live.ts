@@ -14,11 +14,48 @@ import {
 import {
   createExecutionProvider,
   getExecutionConfig,
+  getPolymarketUsClient,
+  hasUsPositionOnMarket,
   isLivePolymarketEnabled,
   isPolymarketUsReady,
   resolveUsMarketSlug,
 } from "@augurium/execution";
 import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
+
+async function reconcileSubmittedMirrors(): Promise<number> {
+  const cfg = getExecutionConfig();
+  if (cfg.provider !== "polymarket-us" || !isPolymarketUsReady()) return 0;
+
+  const rows = await prisma.copyLiveMirror.findMany({
+    where: { status: "SUBMITTED" },
+    include: { market: { select: { slug: true, title: true } } },
+  });
+  if (rows.length === 0) return 0;
+
+  const client = getPolymarketUsClient();
+  let promoted = 0;
+  for (const m of rows) {
+    const slug = await resolveUsMarketSlug({
+      slug: m.market.slug,
+      title: m.market.title,
+    });
+    if (!slug) continue;
+    const pos = await hasUsPositionOnMarket(client, slug);
+    if (pos.ok) {
+      await prisma.copyLiveMirror.update({
+        where: { id: m.id },
+        data: { status: "OPEN" },
+      });
+      promoted++;
+    }
+  }
+  if (promoted > 0) {
+    console.log(
+      `[worker] live copy reconciled ${promoted} SUBMITTED mirror(s) → OPEN (Polymarket US position confirmed)`,
+    );
+  }
+  return promoted;
+}
 
 const LIVE_BANKROLL = Number(
   process.env.COPY_LIVE_BANKROLL_USD ?? process.env.COPY_PAPER_BANKROLL_USD ?? "500",
@@ -262,6 +299,8 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     }
 
     const provider = createExecutionProvider();
+    await reconcileSubmittedMirrors();
+
     const pending = await prisma.copyLiveMirror.findMany({
       where: { status: "PENDING" },
       take: 5,
@@ -338,23 +377,27 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       });
 
       if (result.success) {
+        const filledUsd = result.filledSizeUsd ?? mirror.requestedSizeUsd;
+        const entryPrice = result.fillPrice ?? mirror.entryPrice;
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
           data: {
-            status: "SUBMITTED",
+            status: "OPEN",
             providerOrderId: result.providerOrderId ?? null,
             submittedAt: new Date(),
+            entryPrice,
+            requestedSizeUsd: filledUsd,
             blockReason: null,
           },
         });
         mirrorsSubmitted++;
         await notifyLiveCopyTrade({
-          kind: "submitted",
+          kind: "filled",
           mirrorId: mirror.id,
           marketTitle: mirror.market.title,
           side: mirror.side,
-          sizeUsd: mirror.requestedSizeUsd,
-          entryPrice: mirror.entryPrice,
+          sizeUsd: filledUsd,
+          entryPrice,
           traderAddress: mirror.trader.address,
           providerOrderId: result.providerOrderId ?? null,
         });
