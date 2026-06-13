@@ -42,16 +42,6 @@ envVarGroups:
       - key: SHADOW_SYNC_MAX_RUNTIME_MS
         value: "180000"
       - key: EXECUTION_ENABLED
-        value: "false"
-      - key: EXECUTION_PROVIDER
-        value: paper
-      - key: LIVE_TRADING_ENABLED
-        value: "false"
-      - key: ALLOW_REAL_MONEY
-        value: "false"
-      - key: PAPER_COPY_ENABLED
-        value: "false"
-      - key: EXECUTION_ENABLED
         value: "true"
       - key: EXECUTION_PROVIDER
         value: polymarket-us
@@ -59,6 +49,8 @@ envVarGroups:
         value: "true"
       - key: ALLOW_REAL_MONEY
         value: "true"
+      - key: PAPER_COPY_ENABLED
+        value: "false"
       - key: POLYMARKET_US_READY
         value: "true"
       - key: LIVE_COPY_SKIP_SYSTEM_READINESS
@@ -184,6 +176,16 @@ services:
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
         value: "8"
       - key: LIVE_COPY_ENABLED
+        value: "true"
+      - key: EXECUTION_ENABLED
+        value: "true"
+      - key: EXECUTION_PROVIDER
+        value: polymarket-us
+      - key: LIVE_TRADING_ENABLED
+        value: "true"
+      - key: ALLOW_REAL_MONEY
+        value: "true"
+      - key: POLYMARKET_US_READY
         value: "true"
       - key: POLYMARKET_SIGNATURE_TYPE
         value: "1"
