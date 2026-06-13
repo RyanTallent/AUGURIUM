@@ -8,6 +8,7 @@ import {
   PERIODIC_ANALYSIS_QUEUES,
   WORKER_QUEUES,
 } from "./lib/queue-scheduler.js";
+import { QUEUES } from "@augurium/shared";
 import { runQueueJob } from "./lib/run-queue-job.js";
 import { markOrphanedShadowPortfolioRuns } from "./lib/ingestion-run-lifecycle.js";
 import {
@@ -104,6 +105,14 @@ async function bootstrap(): Promise<void> {
 
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
+
+  if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
+    lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());
+    console.log("[worker] kicking off copy:auto-pipeline now (parallel to ingestion jobs)");
+    void executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval").catch((err) =>
+      console.error("[worker] copy:auto-pipeline bootstrap error", err),
+    );
+  }
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));
