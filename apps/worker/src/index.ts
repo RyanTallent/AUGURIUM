@@ -106,19 +106,17 @@ async function bootstrap(): Promise<void> {
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
 
+  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
+  console.log("[worker] refreshing web snapshots first (dashboard data)");
+  await executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval");
+
   if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
     lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());
-    console.log("[worker] kicking off copy:auto-pipeline now (parallel to ingestion jobs)");
+    console.log("[worker] kicking off copy:auto-pipeline after snapshot refresh");
     void executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval").catch((err) =>
       console.error("[worker] copy:auto-pipeline bootstrap error", err),
     );
   }
-
-  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
-  console.log("[worker] kicking off web:snapshot-refresh now");
-  void executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval").catch((err) =>
-    console.error("[worker] web:snapshot-refresh bootstrap error", err),
-  );
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));

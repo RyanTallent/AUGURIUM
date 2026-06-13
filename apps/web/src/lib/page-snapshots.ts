@@ -42,7 +42,7 @@ export async function loadHomePageData(): Promise<{ data: HomePageData; meta: Pa
   const dash = await getDashboardMetricsSnapshot<
     HomePageData & { copyReadiness?: CopyTradingReadinessReport }
   >();
-  if (dash && !dash.meta.stale && dash.data.board) {
+  if (dash?.data.board) {
     return {
       data: {
         board: dash.data.board,
@@ -50,7 +50,7 @@ export async function loadHomePageData(): Promise<{ data: HomePageData; meta: Pa
         acceptance: dash.data.acceptance ?? null,
         warnings: dash.data.warnings ?? [],
       },
-      meta: { source: "snapshot", snapshot: dash.meta },
+      meta: { source: "snapshot", snapshot: dash.meta, stale: dash.meta.stale },
     };
   }
 
@@ -59,15 +59,15 @@ export async function loadHomePageData(): Promise<{ data: HomePageData; meta: Pa
     acceptance: Awaited<ReturnType<typeof computeAcceptanceForensics>>;
     copyReadiness?: CopyTradingReadinessReport;
   }>();
-  if (copySnap && !copySnap.meta.stale) {
+  if (copySnap?.data.board) {
     return {
       data: {
         board: copySnap.data.board,
         readiness: copySnap.data.copyReadiness ?? null,
         acceptance: copySnap.data.acceptance,
-        warnings: [],
+        warnings: copySnap.meta.stale ? ["Showing last cached copy board"] : [],
       },
-      meta: { source: "snapshot", snapshot: copySnap.meta },
+      meta: { source: "snapshot", snapshot: copySnap.meta, stale: copySnap.meta.stale },
     };
   }
 
@@ -131,13 +131,13 @@ export async function loadCopyBoardPageData(): Promise<{
     mirrorAnalytics?: import("@augurium/copy-trading").CopyMirrorAnalytics;
     weeklyRisk?: import("@augurium/copy-trading").CopyWeeklyRiskStatus;
   }>();
-  if (snap?.data?.board && !snap.meta.stale) {
+  if (snap?.data?.board) {
     return {
       board: snap.data.board,
       readiness: snap.data.copyReadiness ?? null,
       mirrorAnalytics: snap.data.mirrorAnalytics ?? null,
       weeklyRisk: snap.data.weeklyRisk ?? null,
-      meta: { source: "snapshot", snapshot: snap.meta },
+      meta: { source: "snapshot", snapshot: snap.meta, stale: snap.meta.stale },
     };
   }
   const live = await runWithWebDbGuard("copy-page-live", async () => {
@@ -171,11 +171,11 @@ export async function loadCopyPortfoliosData(): Promise<{
     board: CopyBoardReport;
     acceptance: Awaited<ReturnType<typeof computeAcceptanceForensics>>;
   }>();
-  if (snap && !snap.meta.stale) {
+  if (snap?.data?.board) {
     return {
       board: snap.data.board,
       acceptance: snap.data.acceptance,
-      meta: { source: "snapshot", snapshot: snap.meta },
+      meta: { source: "snapshot", snapshot: snap.meta, stale: snap.meta.stale },
     };
   }
   const live = await runWithWebDbGuard("copy-portfolios-live", async () => {

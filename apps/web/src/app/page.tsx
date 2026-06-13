@@ -23,14 +23,22 @@ export default async function HomePage() {
           <p className={styles.kicker}>Trader copy & risk platform</p>
           <h1>{APP_NAME}</h1>
           <p className={styles.hint}>
-            Scan Polymarket → rank best traders → auto-mirror COPY targets (paper until live is
-            enabled).
+            Scan Polymarket → rank best traders → auto-mirror COPY targets on Polymarket US.
           </p>
         </div>
         {readiness && (
-          <span className={readiness.paperTradingReady ? styles.ok : styles.warn}>
-            Paper: {readiness.paperTradingReady ? "READY" : "NOT READY"}
-          </span>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <span
+              className={
+                (readiness as { liveCopyReady?: boolean }).liveCopyReady
+                  ? styles.ok
+                  : styles.warn
+              }
+            >
+              Live copy:{" "}
+              {(readiness as { liveCopyReady?: boolean }).liveCopyReady ? "READY" : "NOT READY"}
+            </span>
+          </div>
         )}
       </header>
 
