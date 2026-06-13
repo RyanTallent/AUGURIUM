@@ -11,4 +11,5 @@ export * from "./live-copy-readiness.js";
 export * from "./copy-weekly-stop.js";
 export * from "./copy-mirror-rules.js";
 export * from "./copy-mirror-analytics.js";
+export * from "./copy-live-sizing.js";
 export * from "./rising-wallets.js";

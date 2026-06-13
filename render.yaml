@@ -56,7 +56,13 @@ envVarGroups:
       - key: LIVE_COPY_SKIP_SYSTEM_READINESS
         value: "true"
       - key: COPY_LIVE_BANKROLL_USD
-        value: "500"
+        value: "200"
+      - key: COPY_LIVE_USE_ACCOUNT_BALANCE
+        value: "true"
+      - key: COPY_LIVE_POSITION_PCT
+        value: "0.15"
+      - key: COPY_LIVE_MAX_DEPLOYED_PCT
+        value: "0.50"
       - key: COPY_LIVE_ORDER_TYPE
         value: market
       - key: WORKER_INTERVAL_WEB_SNAPSHOT_REFRESH_MS
@@ -198,7 +204,7 @@ services:
       - key: COPY_LIVE_TAKE_PROFIT_PCT
         value: "0.2"
       - key: COPY_MAX_CAPITAL_PER_TRADER_PCT
-        value: "0.30"
+        value: "0.50"
       - key: COPY_MAX_CAPITAL_PER_MARKET_PCT
         value: "0.20"
       - key: DATABASE_URL

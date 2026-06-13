@@ -81,6 +81,15 @@ export async function GET() {
       openMirrors: recentOpen.map(mapMirror),
       submittedMirrors: recentSubmitted.map(mapMirror),
       activeMirrors: [...recentOpen, ...recentSubmitted].map(mapMirror),
+      sizing: latestPipeline
+        ? {
+            bankrollUsd: pipelineMeta?.bankrollUsd ?? null,
+            availableUsd: pipelineMeta?.availableUsd ?? null,
+            deployedUsd: pipelineMeta?.deployedUsd ?? null,
+            tradeSizeUsd: pipelineMeta?.tradeSizeUsd ?? null,
+            bankrollSource: pipelineMeta?.bankrollSource ?? null,
+          }
+        : null,
       recentBlocked: recentBlocked.map((m) => ({
         marketTitle: m.market.title,
         side: m.side,
@@ -96,6 +105,11 @@ export async function GET() {
             mirrorsSubmitted: pipelineMeta?.mirrorsSubmitted ?? null,
             liveReady: pipelineMeta?.liveReady ?? null,
             liveMirrorsBlocked: pipelineMeta?.liveMirrorsBlocked ?? null,
+            bankrollUsd: pipelineMeta?.bankrollUsd ?? null,
+            availableUsd: pipelineMeta?.availableUsd ?? null,
+            deployedUsd: pipelineMeta?.deployedUsd ?? null,
+            tradeSizeUsd: pipelineMeta?.tradeSizeUsd ?? null,
+            bankrollSource: pipelineMeta?.bankrollSource ?? null,
             lite: pipelineMeta?.lite ?? null,
           }
         : null,

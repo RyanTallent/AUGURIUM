@@ -164,6 +164,11 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
           liveReady,
           liveMirrorsBlocked,
           mirrorsSubmitted,
+          bankrollUsd: live.bankrollUsd,
+          availableUsd: live.availableUsd,
+          deployedUsd: live.deployedUsd,
+          tradeSizeUsd: live.tradeSizeUsd,
+          bankrollSource: live.bankrollSource,
         } as object,
       },
     });
