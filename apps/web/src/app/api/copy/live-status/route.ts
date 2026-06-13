@@ -59,7 +59,7 @@ export async function GET() {
       openedAt: Date;
       side: string;
       trader: { address: string };
-      market: { title: string; slug: string };
+      market: { title: string; slug: string | null };
     }) => ({
       id: m.id,
       status: m.status,
