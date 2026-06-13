@@ -1,0 +1,102 @@
+import { prisma } from "@augurium/database";
+import {
+  applyRiskToDecision,
+  buildTraderTruth,
+  copyEfficiencyScore,
+  decideCopyTrader,
+} from "@augurium/copy-trading";
+
+export function copyCandidatePoolSize(): number {
+  const raw =
+    process.env.COPY_LIVE_CANDIDATE_POOL ??
+    process.env.COPY_CANDIDATE_POOL ??
+    "500";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 500;
+}
+
+export function copyMaxLeaders(): number {
+  const raw = process.env.COPY_LIVE_MAX_LEADERS ?? process.env.COPY_MAX_LEADERS ?? "80";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 80;
+}
+
+/** Keep CopyTraderControl in sync for live copy (even when paper copy is off). */
+export async function refreshCopyTraderControls(): Promise<{
+  evaluated: number;
+  copyEnabled: number;
+}> {
+  const pool = copyCandidatePoolSize();
+  const traders = await prisma.trader.findMany({
+    where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
+    orderBy: { rankingScore: "desc" },
+    take: pool,
+    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+  });
+
+  let copyEnabled = 0;
+  for (const t of traders) {
+    const truth = buildTraderTruth(t, t.metricsSnapshots[0] ?? null);
+    const decision = applyRiskToDecision(decideCopyTrader(truth), truth);
+    const enabled = decision.recommendation === "COPY";
+    if (enabled) copyEnabled++;
+
+    await prisma.copyTraderControl.upsert({
+      where: { traderId: t.id },
+      create: {
+        traderId: t.id,
+        copyDecision: decision.recommendation,
+        copyScore: decision.copyScore,
+        riskScore: decision.riskScore,
+        expectedValue: decision.expectedValue,
+        enabled,
+        disabledReason: enabled ? null : decision.weaknesses[0] ?? "not COPY",
+        strengths: decision.strengths,
+        weaknesses: decision.weaknesses,
+      },
+      update: {
+        copyDecision: decision.recommendation,
+        copyScore: decision.copyScore,
+        riskScore: decision.riskScore,
+        expectedValue: decision.expectedValue,
+        enabled,
+        disabledReason: enabled ? null : decision.weaknesses[0] ?? "not COPY",
+        strengths: decision.strengths,
+        weaknesses: decision.weaknesses,
+        evaluatedAt: new Date(),
+      },
+    });
+  }
+
+  if (traders.length > 0) {
+    console.log(
+      `[worker] copy trader controls refreshed pool=${pool} evaluated=${traders.length} copyEnabled=${copyEnabled}`,
+    );
+  }
+
+  return { evaluated: traders.length, copyEnabled };
+}
+
+export async function loadTopCopyLeaderIds(): Promise<string[]> {
+  const pool = copyCandidatePoolSize();
+  const maxLeaders = copyMaxLeaders();
+
+  const traders = await prisma.trader.findMany({
+    where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
+    orderBy: { rankingScore: "desc" },
+    take: pool,
+    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+  });
+
+  return traders
+    .map((t) => {
+      const truth = buildTraderTruth(t, t.metricsSnapshots[0] ?? null);
+      const decision = applyRiskToDecision(decideCopyTrader(truth), truth);
+      const efficiency = copyEfficiencyScore(truth, decision);
+      return { traderId: t.id, decision, efficiency };
+    })
+    .filter((r) => r.decision.recommendation === "COPY")
+    .sort((a, b) => b.efficiency - a.efficiency)
+    .slice(0, maxLeaders)
+    .map((r) => r.traderId);
+}

@@ -9,6 +9,7 @@ import { syncPositionsForCopyTargetsFirst } from "./sync-positions-copy-priority
 import { runCopyPaperJob } from "./run-copy-paper.js";
 import { runCopyLiveJob } from "./run-copy-live.js";
 import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
+import { refreshCopyTraderControls } from "../lib/refresh-copy-trader-controls.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
 const INCLUDE_WALLET_ACTIVITY =
@@ -37,6 +38,10 @@ function useLiteLivePath(): boolean {
     process.env.LIVE_COPY_ENABLED === "true" && process.env.PAPER_COPY_ENABLED !== "true"
   );
 }
+
+const INCLUDE_WALLET_DISCOVER = process.env.COPY_AUTO_INCLUDE_WALLET_DISCOVER === "true";
+const INCLUDE_GENERAL_POSITION_SYNC =
+  process.env.COPY_AUTO_SYNC_GENERAL_POSITIONS !== "false";
 
 async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   const started = Date.now();
@@ -107,6 +112,9 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       console.log(
         "[worker] copy:auto-pipeline lite-live — skip global trade ingest (trade:ingest queue handles it)",
       );
+      if (INCLUDE_WALLET_DISCOVER) {
+        walletsDiscovered = await pipelineStep("wallet_discover", discoverWalletsFromHolders);
+      }
     }
 
     if (INCLUDE_WALLET_ACTIVITY) {
@@ -119,13 +127,23 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     const score = await pipelineStep("score_traders", runScoreTradersJob);
     tradersScored = score.scored;
 
-    await pipelineStep("rising_wallets", () => detectRisingWallets(10));
+    const controls = await pipelineStep("copy_trader_controls", refreshCopyTraderControls);
+    console.log(
+      `[worker] copy:auto-pipeline copyTraderControl evaluated=${controls.evaluated} enabled=${controls.copyEnabled}`,
+    );
+
+    await pipelineStep("rising_wallets", () =>
+      detectRisingWallets(Number(process.env.COPY_RISING_WALLET_LIMIT ?? "25")),
+    );
 
     if (lite) {
       positionsSynced = await pipelineStep(
         "position_sync_copy",
         syncPositionsForCopyTargetsFirst,
       );
+      if (INCLUDE_GENERAL_POSITION_SYNC) {
+        positionsSynced += await pipelineStep("position_sync", syncPositionsFromApi);
+      }
     } else {
       positionsSynced = await pipelineStep("position_sync", async () => {
         const copySync = await syncPositionsForCopyTargetsFirst();

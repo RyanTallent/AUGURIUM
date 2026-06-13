@@ -30,9 +30,25 @@ envVarGroups:
       - key: WORKER_POLL_INTERVAL_MS
         value: "30000"
       - key: SCORE_TRADERS_BATCH_SIZE
-        value: "250"
+        value: "500"
       - key: WORKER_INTERVAL_TRADER_SCORE_MS
         value: "30000"
+      - key: WORKER_INTERVAL_TRADE_INGEST_MS
+        value: "60000"
+      - key: WORKER_INTERVAL_WALLET_DISCOVER_MS
+        value: "120000"
+      - key: INGEST_TRADES_PAGE_SIZE
+        value: "200"
+      - key: INGEST_TRADES_MAX_PAGES
+        value: "25"
+      - key: WALLET_DISCOVER_MARKETS_PER_RUN
+        value: "40"
+      - key: WALLET_DISCOVER_HOLDERS_LIMIT
+        value: "80"
+      - key: WALLET_ACTIVITY_BATCH_SIZE
+        value: "15"
+      - key: POSITION_SYNC_BATCH_SIZE
+        value: "25"
       - key: WORKER_INTERVAL_SHADOW_SYNC_MS
         value: "30000"
       - key: SHADOW_SYNC_BATCH_SIZE
@@ -180,7 +196,21 @@ services:
       - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
         value: "true"
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
-        value: "8"
+        value: "40"
+      - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
+        value: "true"
+      - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
+        value: "true"
+      - key: COPY_LIVE_CANDIDATE_POOL
+        value: "500"
+      - key: COPY_LIVE_MAX_LEADERS
+        value: "80"
+      - key: COPY_LIVE_MAX_ORDERS_PER_RUN
+        value: "20"
+      - key: POSITION_SYNC_COPY_BATCH
+        value: "80"
+      - key: COPY_RISING_WALLET_LIMIT
+        value: "25"
       - key: LIVE_COPY_ENABLED
         value: "true"
       - key: EXECUTION_ENABLED

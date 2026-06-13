@@ -1,10 +1,6 @@
 import { prisma } from "@augurium/database";
 import {
-  applyRiskToDecision,
-  buildTraderTruth,
   computeLiveCopyReadiness,
-  copyEfficiencyScore,
-  decideCopyTrader,
   evaluateCopyWeeklyStopLoss,
   isPolymarketClobReady,
   isSourcePositionTooStale,
@@ -28,6 +24,7 @@ import {
 import type { ExecutionProvider } from "@augurium/execution";
 import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
+import { loadTopCopyLeaderIds } from "../lib/refresh-copy-trader-controls.js";
 
 type LiveMirrorRow = {
   id: string;
@@ -223,6 +220,7 @@ const USE_PAPER_SOURCE = process.env.LIVE_COPY_USE_PAPER_SOURCE === "true";
 const CLOSE_ON_LEADER_EXIT = process.env.LIVE_COPY_CLOSE_ON_EXIT !== "false";
 const TAKE_PROFIT_PCT = Number(process.env.COPY_LIVE_TAKE_PROFIT_PCT ?? "0.2");
 const TAKE_PROFIT_ENABLED = process.env.COPY_LIVE_TAKE_PROFIT_ENABLED !== "false";
+const MAX_ORDERS_PER_RUN = Number(process.env.COPY_LIVE_MAX_ORDERS_PER_RUN ?? "20");
 
 export interface CopyLiveJobSummary {
   enabled: boolean;
@@ -254,24 +252,7 @@ async function loadCopyTargetPositions(): Promise<
     avgPrice: number;
   }>
 > {
-  const traders = await prisma.trader.findMany({
-    where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
-    orderBy: { rankingScore: "desc" },
-    take: 120,
-    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
-  });
-
-  const ranked = traders.map((t) => {
-    const truth = buildTraderTruth(t, t.metricsSnapshots[0] ?? null);
-    const decision = applyRiskToDecision(decideCopyTrader(truth), truth);
-    return { traderId: t.id, decision, efficiency: copyEfficiencyScore(truth, decision) };
-  });
-
-  const topIds = ranked
-    .filter((r) => r.decision.recommendation === "COPY")
-    .sort((a, b) => b.efficiency - a.efficiency)
-    .slice(0, 40)
-    .map((r) => r.traderId);
+  const topIds = await loadTopCopyLeaderIds();
 
   const rows = await prisma.position.findMany({
     where: { status: "open", traderId: { in: topIds } },
@@ -563,7 +544,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   if (provider && readiness.ready && isLivePolymarketEnabled(cfg)) {
     const pending = await prisma.copyLiveMirror.findMany({
       where: { status: "PENDING" },
-      take: 10,
+      take: MAX_ORDERS_PER_RUN,
       include: {
         trader: { select: { address: true } },
         market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true } },
