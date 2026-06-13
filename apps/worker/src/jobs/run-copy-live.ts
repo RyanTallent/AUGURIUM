@@ -158,6 +158,15 @@ async function reconcileSubmittedMirrors(): Promise<number> {
         data: { status: "OPEN", openedAt: new Date() },
       });
       promoted++;
+    } else {
+      await prisma.copyLiveMirror.update({
+        where: { id: m.id },
+        data: {
+          status: "CLOSED",
+          closedAt: new Date(),
+          blockReason: "reconciled: no US position after submit",
+        },
+      });
     }
   }
   if (promoted > 0) {
@@ -166,6 +175,47 @@ async function reconcileSubmittedMirrors(): Promise<number> {
     );
   }
   return promoted;
+}
+
+/** Close OPEN mirrors that no longer exist on Polymarket US (manual close, expiry, etc.). */
+async function reconcileStaleOpenMirrors(): Promise<number> {
+  const cfg = getExecutionConfig();
+  if (cfg.provider !== "polymarket-us" || !isPolymarketUsReady()) return 0;
+
+  const rows = await prisma.copyLiveMirror.findMany({
+    where: { status: "OPEN" },
+    include: { market: { select: { slug: true, title: true } } },
+  });
+  if (rows.length === 0) return 0;
+
+  const client = getPolymarketUsClient();
+  let closed = 0;
+  for (const m of rows) {
+    const slug = await resolveUsMarketSlug({
+      slug: m.market.slug,
+      title: m.market.title,
+    });
+    if (!slug) continue;
+    const pos = await hasUsPositionOnMarket(client, slug);
+    if (pos.ok) continue;
+
+    await prisma.copyLiveMirror.update({
+      where: { id: m.id },
+      data: {
+        status: "CLOSED",
+        closedAt: new Date(),
+        blockReason: "reconciled: no US position",
+      },
+    });
+    closed++;
+    console.log(
+      `[worker] live copy reconciled OPEN → CLOSED (flat on US) mirror=${m.id} slug=${slug}`,
+    );
+  }
+  if (closed > 0) {
+    console.log(`[worker] live copy reconciled ${closed} stale OPEN mirror(s) against US portfolio`);
+  }
+  return closed;
 }
 
 const ENABLED = process.env.LIVE_COPY_ENABLED === "true";
@@ -311,6 +361,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     if (executionReady) {
       provider = createExecutionProvider();
       await reconcileSubmittedMirrors();
+      mirrorsClosed += await reconcileStaleOpenMirrors();
       client = cfg.provider === "polymarket-us" ? getPolymarketUsClient() : null;
 
       const activeMirrors = await prisma.copyLiveMirror.findMany({
