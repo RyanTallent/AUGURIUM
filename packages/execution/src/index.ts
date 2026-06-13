@@ -10,6 +10,7 @@ export * from "./replay-provider.js";
 export * from "./factory.js";
 export * from "./locks.js";
 export * from "./exit-engine.js";
+export * from "./render-secret.js";
 export * from "./polymarket-clob.js";
 export * from "./polymarket-us-client.js";
 export * from "./polymarket-us-market-slug.js";

@@ -1,6 +1,7 @@
 import { computeLiveCopyReadiness } from "@augurium/copy-trading";
 import {
   getExecutionConfig,
+  hasConfigSecret,
   validateClobConnection,
   validatePolymarketUsConnection,
 } from "@augurium/execution";
@@ -11,8 +12,8 @@ export async function logPolymarketStartupCheck(): Promise<void> {
   const cfg = getExecutionConfig();
 
   if (cfg.provider === "polymarket-us") {
-    const hasKeyId = Boolean(process.env.POLYMARKET_US_KEY_ID?.trim());
-    const hasSecret = Boolean(process.env.POLYMARKET_US_SECRET_KEY?.trim());
+    const hasKeyId = hasConfigSecret("POLYMARKET_US_KEY_ID");
+    const hasSecret = hasConfigSecret("POLYMARKET_US_SECRET_KEY");
     if (!hasKeyId || !hasSecret) {
       console.warn(
         "[worker] polymarket-us: missing POLYMARKET_US_KEY_ID or POLYMARKET_US_SECRET_KEY — live copy will not trade",

@@ -1,4 +1,5 @@
 import type { ExecutionProviderName } from "./types.js";
+import { hasConfigSecret } from "./render-secret.js";
 
 export interface ExecutionConfig {
   executionEnabled: boolean;
@@ -40,8 +41,8 @@ export function getExecutionConfig(): ExecutionConfig {
     hasApiSecret: Boolean(process.env.POLYMARKET_API_SECRET?.trim()),
     hasApiPassphrase: Boolean(process.env.POLYMARKET_API_PASSPHRASE?.trim()),
     hasFunderAddress: Boolean(process.env.POLYMARKET_FUNDER_ADDRESS?.trim()),
-    hasUsKeyId: Boolean(process.env.POLYMARKET_US_KEY_ID?.trim()),
-    hasUsSecretKey: Boolean(process.env.POLYMARKET_US_SECRET_KEY?.trim()),
+    hasUsKeyId: hasConfigSecret("POLYMARKET_US_KEY_ID"),
+    hasUsSecretKey: hasConfigSecret("POLYMARKET_US_SECRET_KEY"),
   };
 }
 

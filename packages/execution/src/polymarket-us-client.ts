@@ -1,12 +1,13 @@
 import { PolymarketUS } from "polymarket-us";
+import { readConfigSecret } from "./render-secret.js";
 
 let cachedClient: PolymarketUS | null = null;
 
 export function getPolymarketUsClient(): PolymarketUS {
   if (cachedClient) return cachedClient;
 
-  const keyId = process.env.POLYMARKET_US_KEY_ID?.trim();
-  const secretKey = process.env.POLYMARKET_US_SECRET_KEY?.trim();
+  const keyId = readConfigSecret("POLYMARKET_US_KEY_ID");
+  const secretKey = readConfigSecret("POLYMARKET_US_SECRET_KEY");
   if (!keyId || !secretKey) {
     throw new Error("POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET_KEY not configured");
   }
