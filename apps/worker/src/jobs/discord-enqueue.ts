@@ -11,6 +11,7 @@ import {
 } from "@augurium/discord";
 import { queueDiscordEvent } from "../lib/discord-events.js";
 import { dispatchLiveCopyDiscordEvents } from "../lib/discord-live-copy-dispatch.js";
+import { isSilentLiveCopyBlockReason } from "../lib/enqueue-live-copy-discord.js";
 
 const RESEARCH_ALPHA_MIN = Number(process.env.DISCORD_RESEARCH_ALPHA_MIN ?? "55");
 const LIVE_COPY_ONLY = process.env.DISCORD_LIVE_COPY_ONLY === "true";
@@ -60,6 +61,10 @@ async function enqueueLiveCopyTradeDiscord(base: string): Promise<DiscordEnqueue
   });
 
   for (const m of blocked) {
+    if (isSilentLiveCopyBlockReason(m.blockReason)) {
+      skipped++;
+      continue;
+    }
     const st = await queueDiscordEvent({
       eventType: "EXECUTION_BLOCKED",
       dedupeKey: `copy:live:blocked:${m.id}`,
@@ -93,29 +98,8 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
   const base = config.dashboardBaseUrl;
 
   if (LIVE_COPY_ONLY) {
-    const run = await prisma.ingestionRun.create({
-      data: { source: "discord-enqueue", status: "running" },
-    });
-    try {
-      const summary = await enqueueLiveCopyTradeDiscord(base);
-      await prisma.ingestionRun.update({
-        where: { id: run.id },
-        data: {
-          status: "success",
-          itemCount: summary.queued,
-          finishedAt: new Date(),
-          metadata: { ...summary, liveCopyOnly: true },
-        },
-      });
-      return summary;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await prisma.ingestionRun.update({
-        where: { id: run.id },
-        data: { status: "error", error: message, finishedAt: new Date() },
-      });
-      throw err;
-    }
+    const sent = await dispatchLiveCopyDiscordEvents();
+    return { queued: sent, skipped: 0 };
   }
 
   let queued = 0;

@@ -6,6 +6,18 @@ import {
   skipNonLiveCopyDiscordBacklog,
 } from "./discord-live-copy-dispatch.js";
 
+/** Routine scan blocks — dashboard only, not Discord. */
+export function isSilentLiveCopyBlockReason(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  const r = reason.toLowerCase();
+  return (
+    r.includes("late copy") ||
+    r.includes("exposure would exceed") ||
+    r.includes("no deploy room") ||
+    r.includes("insufficient buying power")
+  );
+}
+
 export async function notifyLiveCopyTrade(input: {
   kind: "filled" | "blocked" | "closed";
   mirrorId: string;
@@ -23,6 +35,10 @@ export async function notifyLiveCopyTrade(input: {
     return "skipped";
   }
 
+  if (input.kind === "blocked" && isSilentLiveCopyBlockReason(input.blockReason)) {
+    return "skipped";
+  }
+
   const eventType =
     input.kind === "filled"
       ? "EXECUTION_LIVE"
@@ -36,7 +52,7 @@ export async function notifyLiveCopyTrade(input: {
     where: { dedupeKey },
     select: { status: true },
   });
-  if (existing?.status === "SENT") {
+  if (existing && existing.status !== "SKIPPED") {
     return "already_sent";
   }
 
