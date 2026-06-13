@@ -2,11 +2,15 @@ import { COPY_RISK_LIMITS, buildExposureSnapshot } from "./copy-risk.js";
 
 const MAX_SOURCE_ROI = Number(process.env.COPY_MAX_SOURCE_ROI_TO_MIRROR ?? "0.15");
 
+/** ROI of a leader position (pnl / cost basis). */
+export function leaderPositionRoi(pnl: number, size: number, avgPrice: number): number {
+  const cost = Math.max(0.01, size * avgPrice);
+  return pnl / cost;
+}
+
 /** Skip mirroring when the leader is already deep in profit (we're too late). */
 export function isSourcePositionTooStale(pnl: number, size: number, avgPrice: number): boolean {
-  const cost = Math.max(0.01, size * avgPrice);
-  const roi = pnl / cost;
-  return roi > MAX_SOURCE_ROI;
+  return leaderPositionRoi(pnl, size, avgPrice) > MAX_SOURCE_ROI;
 }
 
 export function canAddMarketExposure(

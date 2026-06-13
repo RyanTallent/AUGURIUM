@@ -195,6 +195,8 @@ services:
         value: "true"
       - key: LIVE_COPY_CLOSE_ON_EXIT
         value: "true"
+      - key: COPY_LIVE_TAKE_PROFIT_PCT
+        value: "0.2"
       - key: DATABASE_URL
         fromDatabase:
           name: augurium-db
