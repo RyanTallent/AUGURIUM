@@ -188,11 +188,32 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
   const client = getPolymarketUsClient();
   let closed = 0;
   for (const m of rows) {
-    const slug = await resolveUsMarketSlug({
-      slug: m.market.slug,
-      title: m.market.title,
-    });
-    if (!slug) continue;
+    let slug = m.market.slug?.trim() || null;
+    if (slug) {
+      try {
+        await client.markets.retrieveBySlug(slug);
+      } catch {
+        slug = null;
+      }
+    }
+    if (!slug) {
+      slug = await resolveUsMarketSlug({
+        slug: m.market.slug,
+        title: m.market.title,
+      });
+    }
+    if (!slug) {
+      await prisma.copyLiveMirror.update({
+        where: { id: m.id },
+        data: {
+          status: "CLOSED",
+          closedAt: new Date(),
+          blockReason: "reconciled: no US market slug",
+        },
+      });
+      closed++;
+      continue;
+    }
     const pos = await hasUsPositionOnMarket(client, slug);
     if (pos.ok) continue;
 
