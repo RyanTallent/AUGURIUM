@@ -14,24 +14,45 @@ const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "15");
 
 async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<string> {
   const externalId = trade.market.startsWith("0x") ? trade.market : `scan:${trade.market}`;
-  const existing = await prisma.market.findUnique({
-    where: { externalId },
+  const conditionId = trade.market.startsWith("0x") ? trade.market : null;
+
+  const existing = await prisma.market.findFirst({
+    where: {
+      OR: [
+        { externalId },
+        ...(conditionId ? [{ conditionId }] : []),
+      ],
+    },
     select: { id: true },
   });
   if (existing) return existing.id;
 
-  const row = await prisma.market.create({
-    data: {
-      externalId,
-      conditionId: trade.market.startsWith("0x") ? trade.market : null,
-      source: "polymarket",
-      title: trade.market_question,
-      slug: trade.event_slug ?? null,
-      eventSlug: trade.event_slug ?? null,
-      active: true,
-    },
-  });
-  return row.id;
+  try {
+    const row = await prisma.market.create({
+      data: {
+        externalId,
+        conditionId,
+        source: "polymarket",
+        title: trade.market_question,
+        slug: trade.event_slug ?? null,
+        eventSlug: trade.event_slug ?? null,
+        active: true,
+      },
+    });
+    return row.id;
+  } catch {
+    const fallback = await prisma.market.findFirst({
+      where: {
+        OR: [
+          { externalId },
+          ...(conditionId ? [{ conditionId }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (fallback) return fallback.id;
+    throw new Error(`failed to resolve market for scan trade ${trade.market}`);
+  }
 }
 
 function netPositionsFromTrades(trades: ScanWalletTrade[]): Array<{
