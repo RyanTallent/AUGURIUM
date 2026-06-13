@@ -5,6 +5,7 @@ import {
   buildSignalAlertEmbed,
   buildTraderNoveltyEmbed,
   buildWeeklyReportPayload,
+  buildLiveCopyTradeEmbed,
   getDiscordConfig,
   weekDedupeKey,
 } from "@augurium/discord";
@@ -28,6 +29,36 @@ export async function runDiscordEnqueueJob(): Promise<DiscordEnqueueSummary> {
   });
 
   try {
+    const liveMirrors = await prisma.copyLiveMirror.findMany({
+      where: { status: { in: ["SUBMITTED", "OPEN"] } },
+      include: {
+        trader: { select: { address: true } },
+        market: { select: { title: true } },
+      },
+      orderBy: { submittedAt: "desc" },
+      take: 30,
+    });
+
+    for (const m of liveMirrors) {
+      const st = await queueDiscordEvent({
+        eventType: "EXECUTION_LIVE",
+        dedupeKey: `copy:live:submitted:${m.id}`,
+        title: `Live copy submitted: ${m.market.title.slice(0, 48)}`,
+        payload: buildLiveCopyTradeEmbed({
+          kind: "submitted",
+          marketTitle: m.market.title,
+          side: m.side,
+          sizeUsd: m.requestedSizeUsd,
+          entryPrice: m.entryPrice,
+          traderAddress: m.trader.address,
+          providerOrderId: m.providerOrderId,
+          dashboardUrl: `${base}/copy`,
+        }),
+      });
+      if (st === "PENDING") queued++;
+      else skipped++;
+    }
+
     const signalTypes = ["TRADE_NOW", "WATCHLIST"];
     const signals = await prisma.signal.findMany({
       where: {

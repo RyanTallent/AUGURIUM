@@ -18,6 +18,7 @@ import {
   isPolymarketUsReady,
   resolveUsMarketSlug,
 } from "@augurium/execution";
+import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
 
 const LIVE_BANKROLL = Number(
   process.env.COPY_LIVE_BANKROLL_USD ?? process.env.COPY_PAPER_BANKROLL_USD ?? "500",
@@ -217,6 +218,10 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   const sourceKeys = new Set(sources.map((s) => s.sourcePositionKey));
   const openMirrors = await prisma.copyLiveMirror.findMany({
     where: { status: { in: ["PENDING", "SUBMITTED", "OPEN"] } },
+    include: {
+      trader: { select: { address: true } },
+      market: { select: { title: true } },
+    },
   });
 
   for (const m of openMirrors) {
@@ -226,6 +231,17 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       data: { status: "CLOSED", closedAt: new Date() },
     });
     mirrorsClosed++;
+    if (m.status === "SUBMITTED" || m.status === "OPEN") {
+      await notifyLiveCopyTrade({
+        kind: "closed",
+        mirrorId: m.id,
+        marketTitle: m.market.title,
+        side: m.side,
+        sizeUsd: m.requestedSizeUsd,
+        entryPrice: m.entryPrice,
+        traderAddress: m.trader.address,
+      });
+    }
   }
 
   if (readiness.ready && isLivePolymarketEnabled(getExecutionConfig())) {
@@ -250,6 +266,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       where: { status: "PENDING" },
       take: 5,
       include: {
+        trader: { select: { address: true } },
         market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true } },
       },
     });
@@ -271,6 +288,16 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
             },
           });
           mirrorsBlocked++;
+          await notifyLiveCopyTrade({
+            kind: "blocked",
+            mirrorId: mirror.id,
+            marketTitle: mirror.market.title,
+            side: mirror.side,
+            sizeUsd: mirror.requestedSizeUsd,
+            entryPrice: mirror.entryPrice,
+            traderAddress: mirror.trader.address,
+            blockReason: "no matching Polymarket US market slug",
+          });
           continue;
         }
       } else {
@@ -285,6 +312,16 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
             data: { status: "BLOCKED", blockReason: "no CLOB token id for market" },
           });
           mirrorsBlocked++;
+          await notifyLiveCopyTrade({
+            kind: "blocked",
+            mirrorId: mirror.id,
+            marketTitle: mirror.market.title,
+            side: mirror.side,
+            sizeUsd: mirror.requestedSizeUsd,
+            entryPrice: mirror.entryPrice,
+            traderAddress: mirror.trader.address,
+            blockReason: "no CLOB token id for market",
+          });
           continue;
         }
       }
@@ -311,6 +348,16 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           },
         });
         mirrorsSubmitted++;
+        await notifyLiveCopyTrade({
+          kind: "submitted",
+          mirrorId: mirror.id,
+          marketTitle: mirror.market.title,
+          side: mirror.side,
+          sizeUsd: mirror.requestedSizeUsd,
+          entryPrice: mirror.entryPrice,
+          traderAddress: mirror.trader.address,
+          providerOrderId: result.providerOrderId ?? null,
+        });
       } else {
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
@@ -320,6 +367,16 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           },
         });
         mirrorsBlocked++;
+        await notifyLiveCopyTrade({
+          kind: "blocked",
+          mirrorId: mirror.id,
+          marketTitle: mirror.market.title,
+          side: mirror.side,
+          sizeUsd: mirror.requestedSizeUsd,
+          entryPrice: mirror.entryPrice,
+          traderAddress: mirror.trader.address,
+          blockReason: result.errorMessage ?? "placeOrder failed",
+        });
       }
     }
   }

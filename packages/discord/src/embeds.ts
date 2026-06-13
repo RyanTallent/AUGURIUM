@@ -1,6 +1,7 @@
 import type { DiscordEmbed, DiscordEventPayload } from "./types.js";
 
 const ADVISORY_FOOTER = "Advisory / shadow simulation — no live execution";
+const LIVE_COPY_FOOTER = "LIVE COPY — real money on Polymarket US";
 const COLORS = {
   tradeNow: 0x22c55e,
   watchlist: 0x3b82f6,
@@ -9,12 +10,22 @@ const COLORS = {
   trader: 0xeab308,
   risk: 0xef4444,
   weekly: 0x6366f1,
+  liveCopy: 0x16a34a,
+  liveBlocked: 0xdc2626,
+  liveClosed: 0xd97706,
 };
 
 function payload(embed: DiscordEmbed): DiscordEventPayload {
   return {
     embeds: [{ ...embed, footer: embed.footer ?? { text: ADVISORY_FOOTER } }],
     advisoryNotice: ADVISORY_FOOTER,
+  };
+}
+
+function liveCopyPayload(embed: DiscordEmbed): DiscordEventPayload {
+  return {
+    embeds: [{ ...embed, footer: embed.footer ?? { text: LIVE_COPY_FOOTER } }],
+    advisoryNotice: LIVE_COPY_FOOTER,
   };
 }
 
@@ -195,6 +206,49 @@ export function buildWeeklyReportEmbed(input: {
         name: s.name,
         value: s.value.slice(0, 900),
       })),
+      { name: "Dashboard", value: input.dashboardUrl },
+    ],
+  });
+}
+
+export function buildLiveCopyTradeEmbed(input: {
+  kind: "submitted" | "blocked" | "closed";
+  marketTitle: string;
+  side: string;
+  sizeUsd: number;
+  entryPrice: number;
+  traderAddress: string;
+  providerOrderId?: string | null;
+  blockReason?: string | null;
+  dashboardUrl: string;
+}): DiscordEventPayload {
+  const titleByKind = {
+    submitted: "LIVE COPY — order submitted",
+    blocked: "LIVE COPY — order blocked",
+    closed: "LIVE COPY — mirror closed",
+  } as const;
+  const colorByKind = {
+    submitted: COLORS.liveCopy,
+    blocked: COLORS.liveBlocked,
+    closed: COLORS.liveClosed,
+  } as const;
+  const trader = `\`${input.traderAddress.slice(0, 6)}…${input.traderAddress.slice(-4)}\``;
+
+  return liveCopyPayload({
+    title: titleByKind[input.kind],
+    description: `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
+    color: colorByKind[input.kind],
+    url: input.dashboardUrl,
+    fields: [
+      { name: "Leader", value: trader, inline: true },
+      { name: "Entry", value: input.entryPrice.toFixed(3), inline: true },
+      { name: "Size", value: `$${input.sizeUsd.toFixed(2)}`, inline: true },
+      ...(input.providerOrderId
+        ? [{ name: "Order ID", value: input.providerOrderId.slice(0, 120) }]
+        : []),
+      ...(input.blockReason
+        ? [{ name: "Reason", value: input.blockReason.slice(0, 900) }]
+        : []),
       { name: "Dashboard", value: input.dashboardUrl },
     ],
   });
