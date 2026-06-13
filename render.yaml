@@ -198,7 +198,7 @@ services:
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
         value: "40"
       - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
-        value: "true"
+        value: "false"
       - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
         value: "true"
       - key: COPY_LIVE_CANDIDATE_POOL

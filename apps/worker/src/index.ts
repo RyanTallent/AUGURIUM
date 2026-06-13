@@ -10,7 +10,10 @@ import {
 } from "./lib/queue-scheduler.js";
 import { QUEUES } from "@augurium/shared";
 import { runQueueJob } from "./lib/run-queue-job.js";
-import { markOrphanedShadowPortfolioRuns } from "./lib/ingestion-run-lifecycle.js";
+import {
+  markOrphanedCopyAutoPipelineRuns,
+  markOrphanedShadowPortfolioRuns,
+} from "./lib/ingestion-run-lifecycle.js";
 import {
   logJobMemory,
   shouldSkipQueueForMemory,
@@ -23,6 +26,8 @@ const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? "30000");
 
 const redis = new Redis(REDIS_URL);
 const lastRunAtMs = new Map<string, number>();
+const COPY_PIPELINE_ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
+let copyPipelineRunning = false;
 
 async function drainRedisTriggers(): Promise<void> {
   for (const queue of WORKER_QUEUES) {
@@ -74,11 +79,39 @@ async function executeQueue(queue: string, reason: "interval" | "redis"): Promis
 
 async function tick(): Promise<void> {
   for (const queue of WORKER_QUEUES) {
+    if (COPY_PIPELINE_ENABLED && queue === QUEUES.COPY_AUTO_PIPELINE) {
+      continue;
+    }
     const triggered = await hasRedisTrigger(queue);
     const due = triggered || isQueueDue(queue, lastRunAtMs.get(queue));
     if (!due) continue;
     await executeQueue(queue, triggered ? "redis" : "interval");
   }
+}
+
+async function runCopyAutoPipeline(reason: "interval" | "redis"): Promise<void> {
+  if (copyPipelineRunning) {
+    console.log(`[worker] copy:auto-pipeline already running — skip (${reason})`);
+    return;
+  }
+  copyPipelineRunning = true;
+  try {
+    await executeQueue(QUEUES.COPY_AUTO_PIPELINE, reason);
+  } finally {
+    copyPipelineRunning = false;
+  }
+}
+
+function scheduleCopyAutoPipeline(): void {
+  const intervalMs = getQueueIntervalMs(QUEUES.COPY_AUTO_PIPELINE);
+  setInterval(() => {
+    void runCopyAutoPipeline("interval").catch((err) =>
+      console.error("[worker] copy:auto-pipeline interval error", err),
+    );
+  }, intervalMs);
+  console.log(
+    `[worker] copy:auto-pipeline on dedicated timer every ${Math.round(intervalMs / 1000)}s`,
+  );
 }
 
 async function bootstrap(): Promise<void> {
@@ -104,19 +137,25 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  const orphaned = await markOrphanedShadowPortfolioRuns();
-  if (orphaned > 0) {
-    console.log(`[worker] cleared ${orphaned} orphaned shadow-portfolio ingestion run(s)`);
+  const [orphanedShadow, orphanedCopy] = await Promise.all([
+    markOrphanedShadowPortfolioRuns(),
+    markOrphanedCopyAutoPipelineRuns(),
+  ]);
+  if (orphanedShadow > 0) {
+    console.log(`[worker] cleared ${orphanedShadow} orphaned shadow-portfolio ingestion run(s)`);
+  }
+  if (orphanedCopy > 0) {
+    console.log(`[worker] cleared ${orphanedCopy} orphaned copy:auto-pipeline ingestion run(s)`);
   }
 
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
   await ensureLiveCopyDiscordOnStartup();
 
-  if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
-    lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());
+  if (COPY_PIPELINE_ENABLED) {
     console.log("[worker] running copy:auto-pipeline first (live trading priority)");
-    await executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval");
+    await runCopyAutoPipeline("interval");
+    scheduleCopyAutoPipeline();
   }
 
   lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
