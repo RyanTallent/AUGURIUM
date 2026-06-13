@@ -1,12 +1,19 @@
 import type { CopyDecision } from "./copy-decision.js";
 import type { TraderTruthMetrics } from "./trader-truth.js";
 
+function readPctEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export const COPY_RISK_LIMITS = {
-  maxCapitalPerTraderPct: 0.05,
-  maxCapitalPerMarketPct: 0.2,
-  maxCapitalPerCategoryPct: 0.2,
-  maxCapitalPerEventPct: 0.3,
-  maxTraderDrawdownPct: 0.2,
+  maxCapitalPerTraderPct: readPctEnv("COPY_MAX_CAPITAL_PER_TRADER_PCT", 0.05),
+  maxCapitalPerMarketPct: readPctEnv("COPY_MAX_CAPITAL_PER_MARKET_PCT", 0.2),
+  maxCapitalPerCategoryPct: readPctEnv("COPY_MAX_CAPITAL_PER_CATEGORY_PCT", 0.2),
+  maxCapitalPerEventPct: readPctEnv("COPY_MAX_CAPITAL_PER_EVENT_PCT", 0.3),
+  maxTraderDrawdownPct: readPctEnv("COPY_MAX_TRADER_DRAWDOWN_PCT", 0.2),
 } as const;
 
 export interface CopyExposureSnapshot {

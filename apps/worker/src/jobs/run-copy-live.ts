@@ -20,6 +20,7 @@ import {
   isLivePolymarketEnabled,
   isPolymarketUsReady,
   resolveUsMarketSlug,
+  verifyUsOrderFill,
 } from "@augurium/execution";
 import type { ExecutionProvider } from "@augurium/execution";
 import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
@@ -136,7 +137,18 @@ async function reconcileSubmittedMirrors(): Promise<number> {
     });
     if (!slug) continue;
     const pos = await hasUsPositionOnMarket(client, slug);
-    if (pos.ok) {
+    let confirmed = pos.ok;
+    if (!confirmed && m.providerOrderId) {
+      const verified = await verifyUsOrderFill(
+        client,
+        m.providerOrderId,
+        slug,
+        undefined,
+        true,
+      );
+      confirmed = verified.success;
+    }
+    if (confirmed) {
       await prisma.copyLiveMirror.update({
         where: { id: m.id },
         data: { status: "OPEN", openedAt: new Date() },
@@ -341,6 +353,22 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       continue;
     }
 
+    if (!localBlock && existing.status === "BLOCKED") {
+      await prisma.copyLiveMirror.update({
+        where: { id: existing.id },
+        data: { status: "PENDING", blockReason: null },
+      });
+      mirrorsPending++;
+      exposureBase.push({
+        traderId: src.traderId,
+        address: src.traderId,
+        marketId: src.marketId,
+        category: null,
+        usd: sizeUsd,
+      });
+      continue;
+    }
+
     if (localBlock && existing.status !== "OPEN" && existing.status !== "SUBMITTED") {
       await prisma.copyLiveMirror.update({
         where: { id: existing.id },
@@ -439,7 +467,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
 
     const pending = await prisma.copyLiveMirror.findMany({
       where: { status: "PENDING" },
-      take: 5,
+      take: 10,
       include: {
         trader: { select: { address: true } },
         market: { select: { clobTokenIds: true, conditionId: true, slug: true, title: true } },

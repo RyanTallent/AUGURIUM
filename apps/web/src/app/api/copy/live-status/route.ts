@@ -77,9 +77,10 @@ export async function GET() {
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
       statusCounts,
-      hasLiveTrade: recentOpen.length > 0,
+      hasLiveTrade: recentOpen.length > 0 || recentSubmitted.length > 0,
       openMirrors: recentOpen.map(mapMirror),
       submittedMirrors: recentSubmitted.map(mapMirror),
+      activeMirrors: [...recentOpen, ...recentSubmitted].map(mapMirror),
       recentBlocked: recentBlocked.map((m) => ({
         marketTitle: m.market.title,
         side: m.side,
