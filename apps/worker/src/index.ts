@@ -106,15 +106,17 @@ async function bootstrap(): Promise<void> {
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
 
-  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
-  console.log("[worker] refreshing web snapshots first (dashboard data)");
-  await executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval");
-
   if (process.env.COPY_AUTO_PIPELINE_ENABLED === "true") {
     lastRunAtMs.set(QUEUES.COPY_AUTO_PIPELINE, Date.now());
-    console.log("[worker] running copy:auto-pipeline after snapshot refresh");
+    console.log("[worker] running copy:auto-pipeline first (live trading priority)");
     await executeQueue(QUEUES.COPY_AUTO_PIPELINE, "interval");
   }
+
+  lastRunAtMs.set(QUEUES.WEB_SNAPSHOT_REFRESH, Date.now());
+  console.log("[worker] refreshing web snapshots in background (dashboard)");
+  void executeQueue(QUEUES.WEB_SNAPSHOT_REFRESH, "interval").catch((err) =>
+    console.error("[worker] web:snapshot-refresh background error", err),
+  );
 
   setInterval(() => {
     void tick().catch((err) => console.error("[worker] tick error", err));

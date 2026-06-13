@@ -28,10 +28,15 @@ export interface WebSnapshotRefreshSummary {
 
 export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSummary> {
   const started = Date.now();
+  console.log("[worker] web:snapshot-refresh step core start");
   const core = await refreshCoreWebSnapshots();
+  console.log(
+    `[worker] web:snapshot-refresh step core done ms=${core.totalMs} steps=${core.steps.map((s) => s.name).join(",")}`,
+  );
   const steps: WebSnapshotRefreshStep[] = [...core.steps];
 
   const copyStarted = Date.now();
+  console.log("[worker] web:snapshot-refresh step copy_trading start");
   try {
     const board = await computeCopyBoard(60);
     const acceptance = await computeAcceptanceForensics();
@@ -55,6 +60,9 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
       Date.now() - copyStarted,
     );
     steps.push({ name: "copy_trading", ok: true, durationMs: Date.now() - copyStarted });
+    console.log(
+      `[worker] web:snapshot-refresh step copy_trading done ms=${Date.now() - copyStarted}`,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await upsertCopyTradingSnapshot({ error: message }, Date.now() - copyStarted, message);
@@ -67,6 +75,7 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
   }
 
   const dashStarted = Date.now();
+  console.log("[worker] web:snapshot-refresh step dashboard start");
   try {
     const readinessRow = await getReadinessSnapshot<LiveTradingReadinessReport>();
     const copyRow = await getCopyTradingSnapshot<{
@@ -88,6 +97,9 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
     };
     await upsertDashboardSnapshot(payload, Date.now() - dashStarted);
     steps.push({ name: "dashboard", ok: true, durationMs: Date.now() - dashStarted });
+    console.log(
+      `[worker] web:snapshot-refresh step dashboard done ms=${Date.now() - dashStarted}`,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     steps.push({
