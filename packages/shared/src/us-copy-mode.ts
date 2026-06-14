@@ -30,5 +30,12 @@ export function requirePolymarketUsForLiveCopy(
 export function isUsBroadIntelMode(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
-  return env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1";
+  if (env.COPY_US_BROAD_INTEL === "false" || env.COPY_US_BROAD_INTEL === "0") {
+    return false;
+  }
+  if (env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1") {
+    return true;
+  }
+  // Default on for US live copy when env not synced from blueprint yet.
+  return isUsOnlyLiveCopyMode(env);
 }

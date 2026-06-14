@@ -1,6 +1,6 @@
 import { prisma } from "@augurium/database";
 import { evaluateUsCompatibilityGate } from "@augurium/execution";
-import { isUsOnlyLiveCopyMode } from "@augurium/shared";
+import { isUsOnlyLiveCopyMode, isUsBroadIntelMode } from "@augurium/shared";
 import { polymarketScanFetch, type ScanWalletTrade } from "./polymarket-scan.js";
 
 const GLOBAL_ONLY_PATTERNS = [
@@ -50,10 +50,10 @@ export function isLikelyUsOverlapMarketTitle(title: string): boolean {
 }
 
 export function usLeaderCompatRequired(): boolean {
-  return (
-    isUsOnlyLiveCopyMode() &&
-    process.env.COPY_US_REQUIRE_COMPAT_POSITION !== "false"
-  );
+  if (process.env.COPY_US_REQUIRE_COMPAT_POSITION === "true") return isUsOnlyLiveCopyMode();
+  if (process.env.COPY_US_REQUIRE_COMPAT_POSITION === "false") return false;
+  // Default off when broad intel is on (matches relaxed US slug matching).
+  return isUsOnlyLiveCopyMode() && !isUsBroadIntelMode();
 }
 
 function netOpenTitlesFromTrades(trades: ScanWalletTrade[]): Array<{
