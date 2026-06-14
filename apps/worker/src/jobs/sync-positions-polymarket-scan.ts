@@ -4,63 +4,65 @@ import {
   storeRawPayload,
   upsertTraderFromWallet,
 } from "../lib/ingestion-store.js";
-import { resolveOrCreateMarket } from "../lib/market-linking.js";
 import {
   polymarketScanFetch,
   type ScanWalletTrade,
 } from "../lib/polymarket-scan.js";
 
 const TRADE_LIMIT = Number(process.env.POLYMARKET_SCAN_TRADES_LIMIT ?? "200");
-const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "15");
+const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "8");
+const MAX_OPEN_POSITIONS = Number(process.env.POSITION_SYNC_MAX_OPEN ?? "12");
 
+/** DB-only — no Gamma/US API (scan sync must stay fast on Render). */
 async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<string | null> {
   const title =
     trade.market_question?.trim() ||
     `Scan market ${trade.market.slice(0, Math.min(12, trade.market.length))}`;
+  const eventSlug = trade.event_slug?.trim() || null;
+  const isCondition = trade.market.startsWith("0x");
+  const externalId = isCondition ? trade.market : `scan:${trade.market}`;
 
-  if (trade.market.startsWith("0x")) {
-    const resolved = await resolveOrCreateMarket({
-      conditionId: trade.market,
-      slug: trade.event_slug ?? null,
-      eventSlug: trade.event_slug ?? null,
-      title,
-    });
-    if (resolved) return resolved.marketId;
+  const existing = await prisma.market.findFirst({
+    where: {
+      OR: isCondition
+        ? [{ conditionId: trade.market }, { externalId: trade.market }]
+        : [{ externalId }],
+    },
+    select: { id: true, slug: true },
+  });
+  if (existing) {
+    if (eventSlug && !existing.slug) {
+      await prisma.market.update({
+        where: { id: existing.id },
+        data: { slug: eventSlug, eventSlug },
+      });
+    }
+    return existing.id;
   }
 
-  const externalId = trade.market.startsWith("0x") ? trade.market : `scan:${trade.market}`;
-  const conditionId = trade.market.startsWith("0x") ? trade.market : null;
-
   try {
-    const row = await prisma.market.upsert({
-      where: { externalId },
-      create: {
+    const row = await prisma.market.create({
+      data: {
         externalId,
-        conditionId,
+        conditionId: isCondition ? trade.market : null,
         source: "polymarket-scan",
         title,
-        slug: trade.event_slug ?? null,
-        eventSlug: trade.event_slug ?? null,
+        slug: eventSlug,
+        eventSlug,
         active: true,
-      },
-      update: {
-        title,
-        slug: trade.event_slug ?? undefined,
-        eventSlug: trade.event_slug ?? undefined,
       },
     });
     return row.id;
   } catch (err) {
-    const existing = await prisma.market.findFirst({
+    const recovered = await prisma.market.findFirst({
       where: {
-        OR: [
-          { externalId },
-          ...(conditionId ? [{ conditionId }] : []),
-        ],
+        OR: isCondition
+          ? [{ conditionId: trade.market }, { externalId }]
+          : [{ externalId }],
       },
       select: { id: true },
     });
-    if (existing) return existing.id;
+    if (recovered) return recovered.id;
     console.warn(
       `[position-sync:scan] market resolve failed market=${trade.market} title="${title.slice(0, 48)}"`,
       err instanceof Error ? err.message : err,
@@ -124,6 +126,10 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
   id: string;
   address: string;
 }): Promise<number> {
+  const short = trader.address.slice(0, 10);
+  const started = Date.now();
+  console.log(`[position-sync:scan] wallet ${short}… fetch start`);
+
   const res = await polymarketScanFetch<ScanWalletTrade[]>("wallet_trades", {
     wallet: trader.address,
     limit: TRADE_LIMIT,
@@ -134,9 +140,12 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
     res,
   );
 
-  if (!res.ok || !res.data) return 0;
+  if (!res.ok || !res.data) {
+    console.log(`[position-sync:scan] wallet ${short}… no trades ms=${Date.now() - started}`);
+    return 0;
+  }
 
-  const nets = netPositionsFromTrades(res.data);
+  const nets = netPositionsFromTrades(res.data).slice(0, MAX_OPEN_POSITIONS);
   let synced = 0;
 
   for (const pos of nets) {
@@ -183,6 +192,9 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
     synced++;
   }
 
+  console.log(
+    `[position-sync:scan] wallet ${short}… open=${nets.length} synced=${synced} ms=${Date.now() - started}`,
+  );
   return synced;
 }
 
@@ -210,10 +222,24 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     traderById.set(t.id, t);
   }
 
+  const watchlist = await prisma.usLeaderWatchlist.findMany({
+    where: { enabled: true },
+    take: COPY_BATCH,
+  });
+
+  console.log(
+    `[position-sync:scan] batch leaders=${traderById.size} watchlist=${watchlist.length} maxOpen=${MAX_OPEN_POSITIONS}`,
+  );
+
   let synced = 0;
+  let index = 0;
+  const total = traderById.size;
   for (const trader of traderById.values()) {
+    index++;
     try {
-      synced += await syncPositionsFromPolymarketScanForTrader(trader);
+      const n = await syncPositionsFromPolymarketScanForTrader(trader);
+      synced += n;
+      console.log(`[position-sync:scan] progress ${index}/${total}`);
     } catch (err) {
       console.warn(
         `[position-sync:scan] trader ${trader.address.slice(0, 10)}… failed`,
@@ -222,10 +248,6 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     }
   }
 
-  const watchlist = await prisma.usLeaderWatchlist.findMany({
-    where: { enabled: true },
-    take: COPY_BATCH,
-  });
   for (const w of watchlist) {
     try {
       const traderId = await upsertTraderFromWallet(w.wallet, "polymarket-scan-watchlist");
@@ -243,7 +265,7 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
 
   if (traderById.size > 0 || watchlist.length > 0) {
     console.log(
-      `[position-sync:scan] ${synced} positions for ${traderById.size} scan leader(s) + ${watchlist.length} watchlist`,
+      `[position-sync:scan] done total=${synced} positions for ${traderById.size} leader(s) + ${watchlist.length} watchlist`,
     );
   }
   return synced;
