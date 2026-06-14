@@ -161,7 +161,9 @@ async function bootstrap(): Promise<void> {
 
   if (COPY_PIPELINE_ENABLED) {
     console.log("[worker] running copy:auto-pipeline first (live trading priority)");
-    await runCopyAutoPipeline("interval");
+    void runCopyAutoPipeline("interval").catch((err) =>
+      console.error("[worker] copy:auto-pipeline bootstrap error", err),
+    );
     scheduleCopyAutoPipeline();
   }
 
