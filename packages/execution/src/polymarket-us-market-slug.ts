@@ -311,16 +311,61 @@ async function verifyUsMarketActive(
   }
 }
 
+function extractCatalogSearchTokens(title: string): string[] {
+  const matchup = extractEsportsMatchup(title);
+  if (matchup) {
+    return matchup
+      .split(/\s+vs\.?\s+/)
+      .map((s) => s.replace(/[^a-z0-9]/gi, "").trim())
+      .filter((s) => s.length >= 3);
+  }
+
+  const norm = normalizeTitle(title);
+  const stop = new Set([
+    "will",
+    "the",
+    "highest",
+    "between",
+    "what",
+    "who",
+    "when",
+    "june",
+    "july",
+    "may",
+    "april",
+  ]);
+  return norm
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-z0-9.+-]/g, ""))
+    .filter((t) => t.length >= 4 && !stop.has(t))
+    .slice(0, 6);
+}
+
 /** Match leader global market metadata against US catalog rows (no global slug translation). */
 export async function matchUsMarketFromCatalog(
   leader: UsMarketLookup,
 ): Promise<UsCompatibilityMatch> {
-  const catalog = await prisma.market.findMany({
-    where: { source: "polymarket-us", active: true, closed: false },
-    select: { slug: true, title: true, category: true },
-    take: 500,
-    orderBy: { updatedAt: "desc" },
-  });
+  const tokens = extractCatalogSearchTokens(leader.title);
+  const catalog =
+    tokens.length > 0
+      ? await prisma.market.findMany({
+          where: {
+            source: "polymarket-us",
+            active: true,
+            closed: false,
+            OR: tokens.map((token) => ({
+              title: { contains: token, mode: "insensitive" as const },
+            })),
+          },
+          select: { slug: true, title: true, category: true },
+          take: 400,
+        })
+      : await prisma.market.findMany({
+          where: { source: "polymarket-us", active: true, closed: false },
+          select: { slug: true, title: true, category: true },
+          take: 500,
+          orderBy: { updatedAt: "desc" },
+        });
 
   let best: UsCompatibilityMatch = {
     slug: null,

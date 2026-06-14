@@ -19,6 +19,7 @@ import {
   evaluateCopyWeeklyStopLoss,
 } from "@augurium/copy-trading";
 import { enqueueCopyBoardChangeDiscord } from "../lib/enqueue-copy-board-discord.js";
+import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 
 export interface WebSnapshotRefreshSummary {
   steps: WebSnapshotRefreshStep[];
@@ -43,7 +44,8 @@ export async function runWebSnapshotRefreshJob(): Promise<WebSnapshotRefreshSumm
     const copyReadiness = await computeCopyTradingReadiness();
     const liveCopyReadiness = await computeLiveCopyReadiness();
     const mirrorAnalytics = await computeCopyMirrorAnalytics();
-    const weeklyRisk = await evaluateCopyWeeklyStopLoss();
+    const bankroll = await resolveLiveCopyBankroll();
+    const weeklyRisk = await evaluateCopyWeeklyStopLoss(bankroll.bankrollUsd);
     const lastTopCopyAddresses = board.topTradersToday.slice(0, 5).map((t) => t.address);
     if (process.env.DISCORD_LIVE_COPY_ONLY !== "true") {
       await enqueueCopyBoardChangeDiscord(board);

@@ -6,6 +6,7 @@ import {
   copyEfficiencyScore,
   decideCopyTrader,
 } from "@augurium/copy-trading";
+import { scoreTraderUsLiveCompat, usLeaderCompatRequired } from "./us-leader-compat.js";
 
 export function copyCandidatePoolSize(): number {
   const raw =
@@ -96,10 +97,41 @@ export async function loadTopCopyLeaderIds(): Promise<string[]> {
     const rows = await prisma.copyTraderControl.findMany({
       where: { enabled: true },
       orderBy: [{ copyScore: "desc" }, { evaluatedAt: "desc" }],
-      take: maxLeaders,
-      select: { traderId: true },
+      take: Math.max(maxLeaders, 20),
+      include: { trader: { select: { id: true, address: true } } },
     });
-    return rows.map((r) => r.traderId);
+
+    if (!usLeaderCompatRequired() || rows.length === 0) {
+      return rows.slice(0, maxLeaders).map((r) => r.traderId);
+    }
+
+    const scored = await Promise.all(
+      rows.map(async (row) => {
+        const compat = await scoreTraderUsLiveCompat(row.trader.id, row.trader.address);
+        return { traderId: row.traderId, copyScore: row.copyScore, compat };
+      }),
+    );
+
+    const tradeable = scored
+      .filter((r) => r.compat.hasTradeableUsPosition)
+      .sort(
+        (a, b) =>
+          b.compat.usCompatible - a.compat.usCompatible ||
+          b.compat.bestConfidence - a.compat.bestConfidence ||
+          b.copyScore - a.copyScore,
+      );
+
+    if (tradeable.length > 0) {
+      console.log(
+        `[worker] US-compat leaders: ${tradeable.length} with tradeable positions (top=${tradeable[0]?.traderId.slice(0, 10)}…)`,
+      );
+      return tradeable.slice(0, maxLeaders).map((r) => r.traderId);
+    }
+
+    console.warn(
+      `[worker] no enabled leaders with US-compatible open positions — ${scored.length} enabled leader(s) skipped for live copy`,
+    );
+    return [];
   }
 
   const pool = copyCandidatePoolSize();

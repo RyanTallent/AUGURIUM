@@ -30,6 +30,7 @@ import type { ExecutionProvider } from "@augurium/execution";
 import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 import { loadTopCopyLeaderIds } from "../lib/refresh-copy-trader-controls.js";
+import { isLikelyGlobalOnlyMarketTitle, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 type LiveMirrorRow = {
   id: string;
@@ -497,6 +498,7 @@ async function loadCopyTargetPositions(): Promise<
   }>
 > {
   const topIds = await loadTopCopyLeaderIds();
+  if (topIds.length === 0) return [];
 
   const rows = await prisma.position.findMany({
     where: { status: "open", traderId: { in: topIds } },
@@ -509,20 +511,51 @@ async function loadCopyTargetPositions(): Promise<
       asset: true,
       pnl: true,
       size: true,
+      market: { select: { title: true, slug: true, category: true } },
     },
   });
 
-  return rows.map((r) => ({
-    traderId: r.traderId,
-    sourcePositionKey: r.externalKey,
-    marketId: r.marketId,
-    side: r.side,
-    entryPrice: r.avgPrice,
-    asset: r.asset,
-    pnl: r.pnl,
-    size: r.size,
-    avgPrice: r.avgPrice,
-  }));
+  const mapped: Array<{
+    traderId: string;
+    sourcePositionKey: string;
+    marketId: string;
+    side: string;
+    entryPrice: number;
+    asset: string | null;
+    pnl: number;
+    size: number;
+    avgPrice: number;
+  }> = [];
+
+  for (const r of rows) {
+    if (usLeaderCompatRequired() && isLikelyGlobalOnlyMarketTitle(r.market.title)) {
+      continue;
+    }
+    if (usLeaderCompatRequired()) {
+      const gate = await evaluateUsCompatibilityGate({
+        globalMarketId: r.marketId,
+        globalTitle: r.market.title,
+        globalSlug: r.market.slug,
+        side: r.side,
+        category: r.market.category,
+      });
+      if (!gate.allowed || !gate.usMarketSlug) continue;
+    }
+
+    mapped.push({
+      traderId: r.traderId,
+      sourcePositionKey: r.externalKey,
+      marketId: r.marketId,
+      side: r.side,
+      entryPrice: r.avgPrice,
+      asset: r.asset,
+      pnl: r.pnl,
+      size: r.size,
+      avgPrice: r.avgPrice,
+    });
+  }
+
+  return mapped;
 }
 
 export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {

@@ -12,6 +12,7 @@ import {
   type ScanWalletPnlSummary,
   type ScanWhaleRow,
 } from "../lib/polymarket-scan.js";
+import { scoreTraderUsLiveCompat, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 const STREAM_LEADERBOARD = "polymarket-scan:leaderboard";
 const WHALE_LIMIT = Number(process.env.POLYMARKET_SCAN_WHALE_LIMIT ?? "50");
@@ -91,11 +92,32 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
     },
   });
 
-  const copyEnabled =
+  const metricsPass =
     trades >= 15 &&
     rankingScore >= Number(process.env.COPY_MIN_SCORE ?? "72") &&
     roi > 0 &&
     winRate >= 0.5;
+
+  let copyEnabled = metricsPass;
+  let disabledReason = metricsPass ? null : "PolymarketScan metrics below COPY threshold";
+  const strengths: string[] = copyEnabled ? ["polymarketscan leader"] : [];
+  const weaknesses: string[] = copyEnabled ? [] : ["scan metrics below threshold"];
+
+  if (usLeaderCompatRequired()) {
+    const usCompat = await scoreTraderUsLiveCompat(traderId, wallet);
+    if (usCompat.openPositions > 0 && !usCompat.hasTradeableUsPosition) {
+      copyEnabled = false;
+      disabledReason = `no US-compatible open positions (${usCompat.openPositions} global-only)`;
+      weaknesses.push("open positions not tradable on Polymarket US");
+    } else if (usCompat.hasTradeableUsPosition) {
+      strengths.push(`US-compat positions: ${usCompat.usCompatible}`);
+      if (!metricsPass && usCompat.usCompatible > 0 && trades >= 10 && roi > 0) {
+        copyEnabled = true;
+        disabledReason = null;
+        strengths.push("US-compat leader override");
+      }
+    }
+  }
 
   await prisma.copyTraderControl.upsert({
     where: { traderId },
@@ -106,9 +128,9 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
       riskScore: Math.max(0, 100 - rankingScore),
       expectedValue: roi,
       enabled: copyEnabled,
-      disabledReason: copyEnabled ? null : "PolymarketScan metrics below COPY threshold",
-      strengths: copyEnabled ? ["polymarketscan leader"] : [],
-      weaknesses: copyEnabled ? [] : ["scan metrics below threshold"],
+      disabledReason,
+      strengths,
+      weaknesses,
     },
     update: {
       copyDecision: copyEnabled ? "COPY" : "WATCH",
@@ -116,7 +138,9 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
       riskScore: Math.max(0, 100 - rankingScore),
       expectedValue: roi,
       enabled: copyEnabled,
-      disabledReason: copyEnabled ? null : "PolymarketScan metrics below COPY threshold",
+      disabledReason,
+      strengths,
+      weaknesses,
       evaluatedAt: new Date(),
     },
   });

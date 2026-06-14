@@ -125,7 +125,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
     liveGatesEnabled &&
     credentialsConfigured &&
     clobImplementationReady &&
-    copyTargetsToday > 0 || scanCopyLeaders > 0;
+    (copyTargetsToday > 0 || scanCopyLeaders > 0);
 
   return {
     ready,

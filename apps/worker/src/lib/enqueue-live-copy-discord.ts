@@ -14,7 +14,10 @@ export function isSilentLiveCopyBlockReason(reason: string | null | undefined): 
     r.includes("late copy") ||
     r.includes("exposure would exceed") ||
     r.includes("no deploy room") ||
-    r.includes("insufficient buying power")
+    r.includes("insufficient buying power") ||
+    r.includes("uncertain match") ||
+    r.includes("no us-compatible") ||
+    r.includes("global-only")
   );
 }
 
