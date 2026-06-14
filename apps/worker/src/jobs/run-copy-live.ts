@@ -631,6 +631,11 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       }))
     : await loadCopyTargetPositions();
 
+  const copyLeaderIds = USE_PAPER_SOURCE ? [] : await loadTopCopyLeaderIds();
+  console.log(
+    `[worker] live copy leaders=${copyLeaderIds.length} sourcePositions=${sources.length}`,
+  );
+
   const sourceKeys = new Set(sources.map((s) => s.sourcePositionKey));
   let provider: ExecutionProvider | null = null;
   let client: ReturnType<typeof getPolymarketUsClient> | null = null;

@@ -1,13 +1,42 @@
 import { getPolymarketUsClient, getPolymarketUsPublicClient, isPolymarketUsReady } from "./polymarket-us-client.js";
 import { prisma } from "@augurium/database";
 
+function isUsBroadIntelLocal(): boolean {
+  const env = process.env;
+  if (env.COPY_US_BROAD_INTEL === "false" || env.COPY_US_BROAD_INTEL === "0") return false;
+  if (env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1") return true;
+  return env.EXECUTION_PROVIDER === "polymarket-us" && env.LIVE_COPY_ENABLED === "true";
+}
+
+export function getUsMatchMinConfidence(): number {
+  const raw = process.env.US_COMPAT_MIN_CONFIDENCE;
+  if (raw != null && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return isUsBroadIntelLocal() ? 0.75 : 0.9;
+}
+
+function shouldTryGlobalSlugOnUs(): boolean {
+  if (process.env.US_COMPAT_TRY_GLOBAL_SLUG === "false") return false;
+  if (process.env.US_COMPAT_TRY_GLOBAL_SLUG === "true") return true;
+  return isUsBroadIntelLocal();
+}
+
+function shouldRelaxUsSlugMatch(): boolean {
+  if (process.env.US_COMPAT_RELAXED_SLUG === "false") return false;
+  if (process.env.US_COMPAT_RELAXED_SLUG === "true") return true;
+  return isUsBroadIntelLocal();
+}
+
 export interface UsMarketLookup {
   slug?: string | null;
   title: string;
   category?: string | null;
 }
 
-export const US_MATCH_MIN_CONFIDENCE = Number(process.env.US_COMPAT_MIN_CONFIDENCE ?? "0.90");
+/** @deprecated use getUsMatchMinConfidence() */
+export const US_MATCH_MIN_CONFIDENCE = 0.9;
 
 export interface UsCompatibilityMatch {
   slug: string | null;
@@ -305,7 +334,7 @@ async function verifyUsMarketActive(
     }
     const usTitle = readUsMarketTitle(retrieved);
     const confidence = titleMatchConfidence(expectedTitle, usTitle);
-    return { ok: confidence >= US_MATCH_MIN_CONFIDENCE, usTitle, confidence };
+    return { ok: confidence >= getUsMatchMinConfidence(), usTitle, confidence };
   } catch {
     return { ok: false, usTitle: "", confidence: 0 };
   }
@@ -443,8 +472,9 @@ export async function resolveUsMarketForExecution(
   leader: UsMarketLookup,
 ): Promise<UsCompatibilityMatch> {
   const client = isPolymarketUsReady() ? getPolymarketUsClient() : getPolymarketUsPublicClient();
-  const tryGlobalSlug = process.env.US_COMPAT_TRY_GLOBAL_SLUG !== "false";
-  const relaxedSlug = process.env.US_COMPAT_RELAXED_SLUG === "true";
+  const minConfidence = getUsMatchMinConfidence();
+  const tryGlobalSlug = shouldTryGlobalSlugOnUs();
+  const relaxedSlug = shouldRelaxUsSlugMatch();
 
   if (tryGlobalSlug && leader.slug?.trim()) {
     const globalSlug = leader.slug.trim();
@@ -467,7 +497,7 @@ export async function resolveUsMarketForExecution(
   }
 
   const catalogMatch = await matchUsMarketFromCatalog(leader);
-  if (catalogMatch.slug && catalogMatch.confidence >= US_MATCH_MIN_CONFIDENCE) {
+  if (catalogMatch.slug && catalogMatch.confidence >= minConfidence) {
     const verified = await verifyUsMarketActive(client, catalogMatch.slug, leader.title);
     if (verified.ok) {
       return {
@@ -480,7 +510,7 @@ export async function resolveUsMarketForExecution(
   }
 
   const searchMatch = await searchUsApiByTitle(client, leader.title);
-  if (searchMatch.slug && searchMatch.confidence >= US_MATCH_MIN_CONFIDENCE) {
+  if (searchMatch.slug && searchMatch.confidence >= minConfidence) {
     const verified = await verifyUsMarketActive(client, searchMatch.slug, leader.title);
     if (verified.ok) {
       return {
@@ -493,11 +523,11 @@ export async function resolveUsMarketForExecution(
   }
 
   const best = catalogMatch.confidence >= searchMatch.confidence ? catalogMatch : searchMatch;
-  if (best.confidence < US_MATCH_MIN_CONFIDENCE) {
+  if (best.confidence < minConfidence) {
     return {
       slug: null,
       confidence: best.confidence,
-      reason: `uncertain match (${(best.confidence * 100).toFixed(0)}% < ${US_MATCH_MIN_CONFIDENCE * 100}% threshold) — skip`,
+      reason: `uncertain match (${(best.confidence * 100).toFixed(0)}% < ${minConfidence * 100}% threshold) — skip`,
     };
   }
 

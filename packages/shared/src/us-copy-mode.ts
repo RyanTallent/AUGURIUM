@@ -26,6 +26,34 @@ export function requirePolymarketUsForLiveCopy(
   return { ok: true };
 }
 
+export function getUsCompatMinConfidence(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): number {
+  const raw = env.US_COMPAT_MIN_CONFIDENCE;
+  if (raw != null && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  if (isUsBroadIntelMode(env)) return 0.75;
+  return 0.9;
+}
+
+export function shouldTryGlobalSlugOnUs(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): boolean {
+  if (env.US_COMPAT_TRY_GLOBAL_SLUG === "false") return false;
+  if (env.US_COMPAT_TRY_GLOBAL_SLUG === "true") return true;
+  return isUsBroadIntelMode(env);
+}
+
+export function shouldRelaxUsSlugMatch(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): boolean {
+  if (env.US_COMPAT_RELAXED_SLUG === "false") return false;
+  if (env.US_COMPAT_RELAXED_SLUG === "true") return true;
+  return isUsBroadIntelMode(env);
+}
+
 /** Re-enable score-traders, full COPY controls, rising wallets while executing on Polymarket US. */
 export function isUsBroadIntelMode(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},

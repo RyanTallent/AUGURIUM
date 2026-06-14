@@ -1,5 +1,6 @@
 import {
   resolveUsMarketForExecution,
+  getUsMatchMinConfidence,
   type UsMarketLookup,
 } from "./polymarket-us-market-slug.js";
 
@@ -18,12 +19,11 @@ export interface UsCompatibilityResult {
   usMarketSlug: string | null;
 }
 
-const MIN_CONFIDENCE = Number(process.env.US_COMPAT_MIN_CONFIDENCE ?? "0.90");
-
-/** Strict US compatibility gate — skip copy when match confidence is below threshold. */
+/** US compatibility gate — skip copy when match confidence is below threshold. */
 export async function evaluateUsCompatibilityGate(
   input: UsCompatibilityInput,
 ): Promise<UsCompatibilityResult> {
+  const minConfidence = getUsMatchMinConfidence();
   const leader: UsMarketLookup = {
     slug: input.globalSlug,
     title: input.globalTitle,
@@ -31,7 +31,7 @@ export async function evaluateUsCompatibilityGate(
   };
 
   const match = await resolveUsMarketForExecution(leader);
-  const allowed = Boolean(match.slug) && match.confidence >= MIN_CONFIDENCE;
+  const allowed = Boolean(match.slug) && match.confidence >= minConfidence;
 
   return {
     allowed,

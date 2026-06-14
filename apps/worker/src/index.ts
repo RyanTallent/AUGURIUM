@@ -8,7 +8,7 @@ import {
   PERIODIC_ANALYSIS_QUEUES,
   WORKER_QUEUES,
 } from "./lib/queue-scheduler.js";
-import { QUEUES, isUsBroadIntelMode } from "@augurium/shared";
+import { QUEUES, isUsBroadIntelMode, getUsCompatMinConfidence } from "@augurium/shared";
 import { runQueueJob } from "./lib/run-queue-job.js";
 import {
   markOrphanedCopyAutoPipelineRuns,
@@ -140,7 +140,7 @@ async function bootstrap(): Promise<void> {
       `[worker] copy auto pipeline interval ms: ${getQueueIntervalMs(QUEUES.COPY_AUTO_PIPELINE)}`,
     );
     console.log(
-      `[worker] US broad intel: ${isUsBroadIntelMode()} (COPY_US_BROAD_INTEL=${process.env.COPY_US_BROAD_INTEL ?? "default"})`,
+      `[worker] US broad intel: ${isUsBroadIntelMode()} (COPY_US_BROAD_INTEL=${process.env.COPY_US_BROAD_INTEL ?? "default"}) minConf=${getUsCompatMinConfidence()} globalSlug=${process.env.US_COMPAT_TRY_GLOBAL_SLUG ?? "default"}`,
     );
   }
 

@@ -139,4 +139,4 @@ export {
   type DiscordEnvConfig,
   type DiscordWebhookChannel,
 } from "./discord-config.js";
-export { isUsOnlyLiveCopyMode, usePolymarketScanIntel, requirePolymarketUsForLiveCopy, isUsBroadIntelMode } from "./us-copy-mode.js";
+export { isUsOnlyLiveCopyMode, usePolymarketScanIntel, requirePolymarketUsForLiveCopy, isUsBroadIntelMode, getUsCompatMinConfidence, shouldTryGlobalSlugOnUs, shouldRelaxUsSlugMatch } from "./us-copy-mode.js";
