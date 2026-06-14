@@ -33,6 +33,78 @@ function pnlToRanking(summary: ScanWalletPnlSummary | null | undefined): number 
   return Math.max(0, roi * 100 + winRate * 20 + Math.log10(Math.max(1, Math.abs(pnl))) * 5);
 }
 
+function scanTier(trades: number, winRate: number, roi: number): string {
+  if (trades >= 100 && winRate >= 0.6 && roi >= 0.12) return "ELITE";
+  if (trades >= 50 && winRate >= 0.55 && roi > 0) return "RISING";
+  return "UNRANKED";
+}
+
+async function upsertScanMetricsSnapshot(
+  traderId: string,
+  summary: ScanWalletPnlSummary | null | undefined,
+  rankingScore: number,
+): Promise<void> {
+  const tradeCount = Math.max(0, Math.floor(Number(summary?.trade_count ?? 0)));
+  const winRate = Number(summary?.win_rate ?? 0);
+  const roi = Number(summary?.roi ?? summary?.roi_percent ?? 0);
+  const realizedPnl = Number(summary?.realized_pnl ?? summary?.total_pnl ?? 0);
+  const unrealizedPnl = Number(summary?.unrealized_pnl ?? 0);
+  const totalPnl = realizedPnl + unrealizedPnl;
+  const copyability = Math.min(1, winRate * 0.55 + Math.max(0, roi + 0.05) * 0.45);
+  const confidence = Math.min(
+    1,
+    (tradeCount >= 100 ? 0.55 : tradeCount / 200) + winRate * 0.35 + Math.min(0.1, roi),
+  );
+  const recentForm = Math.min(1, winRate * 0.7 + Math.max(0, roi) * 0.3);
+  const maxDrawdown = roi > 0.2 ? 0.08 : roi > 0 ? 0.12 : 0.2;
+  const tier = scanTier(tradeCount, winRate, roi);
+
+  await prisma.traderMetricsSnapshot.create({
+    data: {
+      traderId,
+      tradeCount,
+      marketCount: Math.max(1, Math.floor(tradeCount / 4)),
+      totalVolume: Math.abs(totalPnl) * 8,
+      activeDays: Math.min(365, Math.max(30, tradeCount)),
+      averageTradeSize: tradeCount > 0 ? Math.abs(totalPnl) / tradeCount : 0,
+      averagePositionSize: tradeCount > 0 ? Math.abs(totalPnl) / tradeCount : 0,
+      realizedPnl,
+      unrealizedPnl,
+      estimatedTotalPnl: totalPnl,
+      roi,
+      winRate,
+      lossRate: Math.max(0, 1 - winRate),
+      averageWin: roi > 0 ? roi * 0.4 : 0,
+      averageLoss: roi > 0 ? roi * 0.15 : 0.1,
+      profitFactor: winRate > 0 ? winRate / Math.max(0.05, 1 - winRate) : 0,
+      maxDrawdown,
+      consistencyScore: recentForm,
+      roi7d: roi * 0.35,
+      roi30d: roi * 0.65,
+      roi90d: roi,
+      roi180d: roi,
+      volume7d: 0,
+      volume30d: Math.abs(totalPnl),
+      tradeCount7d: Math.min(tradeCount, 10),
+      tradeCount30d: Math.min(tradeCount, 40),
+      copyabilityScore: copyability,
+      estimatedCopiedRoi: roi * copyability,
+      averageSlippageEstimate: 0.02,
+      averageExecutionDelayEstimate: 45,
+      mirrorabilityScore: copyability,
+      copiedProfitFactor: 1,
+      informationEdgeScore: confidence,
+      confidenceScore: confidence,
+      recentFormScore: recentForm,
+      rankingScore,
+      tier,
+      specialistScore: copyability,
+      lowConfidence: tradeCount < 100,
+      rankingReason: "polymarketscan wallet_pnl",
+    },
+  });
+}
+
 async function collectLeaderWallets(): Promise<string[]> {
   const wallets = new Set<string>();
 
@@ -79,6 +151,12 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
   const trades = Number(pnlRes.data?.summary?.trade_count ?? 0);
 
   const traderId = await upsertTraderFromWallet(wallet, "polymarket-scan");
+  const tier = scanTier(trades, winRate, roi);
+  const copyability = Math.min(1, winRate * 0.55 + Math.max(0, roi + 0.05) * 0.45);
+  const confidence = Math.min(
+    1,
+    (trades >= 100 ? 0.55 : trades / 200) + winRate * 0.35 + Math.min(0.1, roi),
+  );
   await prisma.trader.update({
     where: { id: traderId },
     data: {
@@ -87,10 +165,17 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
       roi,
       winRate,
       trades: trades > 0 ? trades : undefined,
+      tier,
+      copyabilityScore: copyability,
+      confidenceScore: confidence,
+      recentFormScore: Math.min(1, winRate * 0.7 + Math.max(0, roi) * 0.3),
+      lowConfidence: trades < 100,
       lastScoredAt: new Date(),
       discoveredVia: "polymarket-scan",
     },
   });
+
+  await upsertScanMetricsSnapshot(traderId, pnlRes.data?.summary, rankingScore);
 
   const metricsPass =
     trades >= 15 &&

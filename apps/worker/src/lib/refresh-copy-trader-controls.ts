@@ -30,12 +30,19 @@ export function copyMinLeaders(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
 }
 
+function usGateRefreshLimit(): number {
+  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? "40";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 40;
+}
+
 /** Keep CopyTraderControl in sync with v1 scoring gates. */
 export async function refreshCopyTraderControls(): Promise<{
   evaluated: number;
   copyEnabled: number;
 }> {
   const pool = copyCandidatePoolSize();
+  const gateLimit = usGateRefreshLimit();
   const traders = await prisma.trader.findMany({
     where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
     orderBy: { rankingScore: "desc" },
@@ -43,17 +50,26 @@ export async function refreshCopyTraderControls(): Promise<{
     include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
   });
 
+  const gateTraderIds = new Set(
+    [...traders].sort((a, b) => b.rankingScore - a.rankingScore).slice(0, gateLimit).map((t) => t.id),
+  );
+
   let copyEnabled = 0;
   const promoted: string[] = [];
   const cooled: string[] = [];
+  const failReasons = new Map<string, number>();
 
-  for (const t of traders) {
+  for (let i = 0; i < traders.length; i++) {
+    const t = traders[i];
     const snap = t.metricsSnapshots[0] ?? null;
     const truth = buildTraderTruth(t, snap);
     const legacy = applyRiskToDecision(decideCopyTrader(truth), truth);
 
     let usMatch = 0;
-    if (usLeaderCompatRequired() || usePolymarketScanIntel()) {
+    if (
+      (usLeaderCompatRequired() || usePolymarketScanIntel()) &&
+      gateTraderIds.has(t.id)
+    ) {
       const compat = await scoreTraderUsLiveCompat(t.id, t.address);
       usMatch = compat.bestConfidence;
     }
@@ -61,6 +77,10 @@ export async function refreshCopyTraderControls(): Promise<{
     const v1 = evaluateCopyV1LeaderGate({ truth, usMatchConfidence: usMatch });
     const enabled = v1.pass && legacy.recommendation !== "AVOID";
     if (enabled) copyEnabled++;
+    else if (v1.reasons[0]) {
+      const key = v1.reasons[0].split(" < ")[0] ?? v1.reasons[0];
+      failReasons.set(key, (failReasons.get(key) ?? 0) + 1);
+    }
 
     const prior = await prisma.copyTraderControl.findUnique({
       where: { traderId: t.id },
@@ -101,6 +121,10 @@ export async function refreshCopyTraderControls(): Promise<{
         evaluatedAt: new Date(),
       },
     });
+
+    if (i > 0 && i % 25 === 0) {
+      console.log(`[worker] copy trader controls progress ${i}/${traders.length}`);
+    }
   }
 
   if (promoted.length > 0 || cooled.length > 0) {
@@ -108,8 +132,13 @@ export async function refreshCopyTraderControls(): Promise<{
   }
 
   if (traders.length > 0) {
+    const topFails = [...failReasons.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([k, n]) => `${n}x ${k}`)
+      .join(" | ");
     console.log(
-      `[worker] copy trader controls refreshed pool=${pool} evaluated=${traders.length} copyEnabled=${copyEnabled}`,
+      `[worker] copy trader controls refreshed pool=${pool} usGate=${gateLimit} evaluated=${traders.length} copyEnabled=${copyEnabled}${topFails ? ` topFails=${topFails}` : ""}`,
     );
   }
 
