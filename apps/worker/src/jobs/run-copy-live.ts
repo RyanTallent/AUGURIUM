@@ -30,7 +30,7 @@ import type { ExecutionProvider } from "@augurium/execution";
 import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 import { loadTopCopyLeaderIds } from "../lib/refresh-copy-trader-controls.js";
-import { isLikelyGlobalOnlyMarketTitle, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
+import { isLikelyGlobalOnlyMarketTitle, isLikelyUsOverlapMarketTitle, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 type LiveMirrorRow = {
   id: string;
@@ -529,6 +529,9 @@ async function loadCopyTargetPositions(): Promise<
 
   for (const r of rows) {
     if (usLeaderCompatRequired() && isLikelyGlobalOnlyMarketTitle(r.market.title)) {
+      continue;
+    }
+    if (usLeaderCompatRequired() && !isLikelyUsOverlapMarketTitle(r.market.title)) {
       continue;
     }
     if (usLeaderCompatRequired()) {

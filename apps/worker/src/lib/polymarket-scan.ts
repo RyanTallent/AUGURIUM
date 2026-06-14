@@ -30,7 +30,8 @@ export async function polymarketScanFetch<T>(
     if (v !== undefined && v !== null) qs.set(k, String(v));
   }
   const url = `${BASE_URL}?${qs.toString()}`;
-  const res = await fetch(url);
+  const timeoutMs = Number(process.env.POLYMARKET_SCAN_FETCH_TIMEOUT_MS ?? "25000");
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   const json = (await res.json()) as PolymarketScanResponse<T>;
   return json;
 }

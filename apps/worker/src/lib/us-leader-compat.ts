@@ -14,10 +14,39 @@ const GLOBAL_ONLY_PATTERNS = [
   /\bbetween \d+.+\d+°/i,
 ];
 
+const US_LIKELY_PATTERNS = [
+  /\bcounter-strike\b/i,
+  /\bvalorant\b/i,
+  /\bdota\s*2?\b/i,
+  /\bleague of legends\b/i,
+  /\bcs2\b/i,
+  /\bmlb\b/i,
+  /\bnba\b/i,
+  /\bnfl\b/i,
+  /\bnhl\b/i,
+  /\bsoccer\b/i,
+  /\btennis\b/i,
+  /\besports\b/i,
+  /\bpresident\b/i,
+  /\belection\b/i,
+  /\bsuper bowl\b/i,
+  /\bworld series\b/i,
+];
+
+const MAX_FULL_GATE_POSITIONS = Number(process.env.COPY_US_COMPAT_MAX_GATE_CHECKS ?? "2");
+const MAX_FULL_GATE_LEADERS = Number(process.env.COPY_US_COMPAT_MAX_LEADERS ?? "5");
+
 export function isLikelyGlobalOnlyMarketTitle(title: string): boolean {
   const t = title.trim();
   if (!t) return false;
   return GLOBAL_ONLY_PATTERNS.some((p) => p.test(t));
+}
+
+export function isLikelyUsOverlapMarketTitle(title: string): boolean {
+  if (isLikelyGlobalOnlyMarketTitle(title)) return false;
+  const norm = title.toLowerCase();
+  if (norm.includes(" vs ") || norm.includes(" vs. ")) return true;
+  return US_LIKELY_PATTERNS.some((p) => p.test(norm));
 }
 
 export function usLeaderCompatRequired(): boolean {
@@ -66,53 +95,108 @@ export interface UsLeaderCompatScore {
   hasTradeableUsPosition: boolean;
 }
 
-/** Score a leader's open positions for Polymarket US live copy. */
-export async function scoreTraderUsLiveCompat(
+async function loadOpenPositionCandidates(
   traderId: string,
   address: string,
-): Promise<UsLeaderCompatScore> {
-  const dbPositions = await prisma.position.findMany({
-    where: { traderId, status: "open" },
-    include: { market: { select: { id: true, title: true, slug: true, category: true } } },
-    take: 25,
-  });
-
-  let candidates: Array<{
+  fetchTrades: boolean,
+): Promise<
+  Array<{
     marketId: string;
     title: string;
     slug: string | null;
     category: string | null;
-  }>;
+  }>
+> {
+  const dbPositions = await prisma.position.findMany({
+    where: { traderId, status: "open" },
+    include: { market: { select: { id: true, title: true, slug: true, category: true } } },
+    take: 12,
+  });
 
   if (dbPositions.length > 0) {
-    candidates = dbPositions.map((p) => ({
+    return dbPositions.map((p) => ({
       marketId: p.marketId,
       title: p.market.title,
       slug: p.market.slug,
       category: p.market.category,
     }));
-  } else {
-    const res = await polymarketScanFetch<ScanWalletTrade[]>("wallet_trades", {
-      wallet: address,
-      limit: 80,
-    });
-    candidates = netOpenTitlesFromTrades(res.data ?? []).map((p) => ({
-      marketId: p.marketId,
-      title: p.title,
-      slug: p.slug,
-      category: null,
-    }));
   }
 
+  if (!fetchTrades) return [];
+
+  const res = await polymarketScanFetch<ScanWalletTrade[]>("wallet_trades", {
+    wallet: address,
+    limit: 40,
+  });
+  return netOpenTitlesFromTrades(res.data ?? []).map((p) => ({
+    marketId: p.marketId,
+    title: p.title,
+    slug: p.slug,
+    category: null,
+  }));
+}
+
+function scoreCandidatesFast(
+  candidates: Array<{
+    marketId: string;
+    title: string;
+    slug: string | null;
+    category: string | null;
+  }>,
+): UsLeaderCompatScore {
   let likelyGlobalOnly = 0;
   let usCompatible = 0;
-  let bestConfidence = 0;
 
   for (const pos of candidates) {
     if (isLikelyGlobalOnlyMarketTitle(pos.title)) {
       likelyGlobalOnly++;
       continue;
     }
+    if (isLikelyUsOverlapMarketTitle(pos.title)) usCompatible++;
+  }
+
+  return {
+    openPositions: candidates.length,
+    likelyGlobalOnly,
+    usCompatible,
+    bestConfidence: usCompatible > 0 ? 0.75 : 0,
+    hasTradeableUsPosition: usCompatible > 0,
+  };
+}
+
+/** Fast heuristic only — safe for PolymarketScan ingest (no US API calls). */
+export async function scoreTraderUsLiveCompatFast(
+  traderId: string,
+  address: string,
+): Promise<UsLeaderCompatScore> {
+  const candidates = await loadOpenPositionCandidates(traderId, address, true);
+  return scoreCandidatesFast(candidates);
+}
+
+/** Full US gate — use sparingly (live copy leader pick / position filter). */
+export async function scoreTraderUsLiveCompat(
+  traderId: string,
+  address: string,
+): Promise<UsLeaderCompatScore> {
+  const candidates = await loadOpenPositionCandidates(traderId, address, false);
+  if (candidates.length === 0) {
+    return scoreTraderUsLiveCompatFast(traderId, address);
+  }
+
+  const fast = scoreCandidatesFast(candidates);
+  if (fast.openPositions > 0 && fast.usCompatible === 0) {
+    return fast;
+  }
+
+  let usCompatible = 0;
+  let bestConfidence = fast.bestConfidence;
+  let likelyGlobalOnly = fast.likelyGlobalOnly;
+
+  const toCheck = candidates
+    .filter((p) => !isLikelyGlobalOnlyMarketTitle(p.title))
+    .slice(0, MAX_FULL_GATE_POSITIONS);
+
+  for (const pos of toCheck) {
     const gate = await evaluateUsCompatibilityGate({
       globalMarketId: pos.marketId,
       globalTitle: pos.title,
@@ -127,8 +211,14 @@ export async function scoreTraderUsLiveCompat(
   return {
     openPositions: candidates.length,
     likelyGlobalOnly,
-    usCompatible,
+    usCompatible: Math.max(usCompatible, fast.usCompatible),
     bestConfidence,
-    hasTradeableUsPosition: usCompatible > 0,
+    hasTradeableUsPosition: usCompatible > 0 || fast.hasTradeableUsPosition,
   };
+}
+
+export function maxFullGateLeaders(): number {
+  return Number.isFinite(MAX_FULL_GATE_LEADERS) && MAX_FULL_GATE_LEADERS > 0
+    ? MAX_FULL_GATE_LEADERS
+    : 5;
 }

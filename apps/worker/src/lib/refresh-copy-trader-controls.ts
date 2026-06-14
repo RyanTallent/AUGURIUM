@@ -6,7 +6,7 @@ import {
   copyEfficiencyScore,
   decideCopyTrader,
 } from "@augurium/copy-trading";
-import { scoreTraderUsLiveCompat, usLeaderCompatRequired } from "./us-leader-compat.js";
+import { scoreTraderUsLiveCompat, usLeaderCompatRequired, maxFullGateLeaders } from "./us-leader-compat.js";
 
 export function copyCandidatePoolSize(): number {
   const raw =
@@ -106,7 +106,7 @@ export async function loadTopCopyLeaderIds(): Promise<string[]> {
     }
 
     const scored = await Promise.all(
-      rows.map(async (row) => {
+      rows.slice(0, maxFullGateLeaders()).map(async (row) => {
         const compat = await scoreTraderUsLiveCompat(row.trader.id, row.trader.address);
         return { traderId: row.traderId, copyScore: row.copyScore, compat };
       }),

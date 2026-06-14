@@ -12,7 +12,7 @@ import {
   type ScanWalletPnlSummary,
   type ScanWhaleRow,
 } from "../lib/polymarket-scan.js";
-import { scoreTraderUsLiveCompat, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
+import { scoreTraderUsLiveCompatFast, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 const STREAM_LEADERBOARD = "polymarket-scan:leaderboard";
 const WHALE_LIMIT = Number(process.env.POLYMARKET_SCAN_WHALE_LIMIT ?? "50");
@@ -104,7 +104,7 @@ async function upsertTraderFromScan(wallet: string): Promise<void> {
   const weaknesses: string[] = copyEnabled ? [] : ["scan metrics below threshold"];
 
   if (usLeaderCompatRequired()) {
-    const usCompat = await scoreTraderUsLiveCompat(traderId, wallet);
+    const usCompat = await scoreTraderUsLiveCompatFast(traderId, wallet);
     if (usCompat.openPositions > 0 && !usCompat.hasTradeableUsPosition) {
       copyEnabled = false;
       disabledReason = `no US-compatible open positions (${usCompat.openPositions} global-only)`;
@@ -162,7 +162,9 @@ export async function ingestPolymarketScanLeaders(): Promise<number> {
   }
 
   for (const wallet of batch) {
+    const started = Date.now();
     await upsertTraderFromScan(wallet);
+    console.log(`[polymarket-scan] wallet scored ${wallet.slice(0, 10)}… ms=${Date.now() - started}`);
   }
 
   const nextOffset = offset + batch.length >= wallets.length ? 0 : offset + batch.length;

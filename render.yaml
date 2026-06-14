@@ -218,7 +218,7 @@ services:
       - key: INGEST_STORE_RAW_PAYLOAD
         value: "false"
       - key: POLYMARKET_SCAN_WALLET_BATCH
-        value: "15"
+        value: "8"
       - key: US_MARKET_CATALOG_WARM_MIN
         value: "3000"
       - key: US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN
@@ -237,6 +237,10 @@ services:
         value: "0.90"
       - key: COPY_US_REQUIRE_COMPAT_POSITION
         value: "true"
+      - key: COPY_US_COMPAT_MAX_GATE_CHECKS
+        value: "2"
+      - key: COPY_US_COMPAT_MAX_LEADERS
+        value: "5"
       - key: COPY_LIVE_MAX_LEADERS
         value: "5"
       - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
