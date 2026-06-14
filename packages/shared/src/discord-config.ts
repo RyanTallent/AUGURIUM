@@ -37,6 +37,7 @@ export function discordChannelForEventType(eventType: string): DiscordWebhookCha
     case "EXECUTION_LIVE":
       return "TRADE_ENTER";
     case "COPY_LIVE_CLOSED":
+    case "COPY_LIVE_PARTIAL":
       return "TRADE_EXIT";
     case "EXECUTION_BLOCKED":
     case "EXECUTION_ERROR":

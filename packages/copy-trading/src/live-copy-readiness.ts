@@ -6,6 +6,7 @@ import {
   executionModeLabel,
 } from "@augurium/execution";
 import { computeCopyBoard } from "./compute-copy-board.js";
+import { usePolymarketScanIntel } from "@augurium/shared";
 
 export interface LiveCopyReadinessReport {
   ready: boolean;
@@ -42,10 +43,13 @@ function isUsProvider(provider: string): boolean {
 export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessReport> {
   const cfg = getExecutionConfig();
   const us = isUsProvider(cfg.provider);
-  const [system, board, openLiveMirrors] = await Promise.all([
+  const [system, board, openLiveMirrors, scanCopyLeaders] = await Promise.all([
     computeLiveTradingReadiness(),
     computeCopyBoard(30),
     prisma.copyLiveMirror.count({ where: { status: { in: ["PENDING", "SUBMITTED", "OPEN"] } } }),
+    usePolymarketScanIntel()
+      ? prisma.copyTraderControl.count({ where: { enabled: true } })
+      : Promise.resolve(0),
   ]);
 
   const credentialsConfigured = us
@@ -57,6 +61,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
   const liveGatesEnabled = isLivePolymarketEnabled(cfg);
   const clobImplementationReady = us ? isPolymarketUsReady() : isPolymarketClobReady();
   const copyTargetsToday = board.topTradersToday.length;
+  const copyLeaderCount = Math.max(copyTargetsToday, scanCopyLeaders);
 
   const blockers: string[] = [];
   if (!cfg.executionEnabled) blockers.push("EXECUTION_ENABLED is false");
@@ -89,7 +94,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
     blockers.push("System readiness failed (shadow/paper/data gates)");
     blockers.push(...system.blockers.slice(0, 5));
   }
-  if (copyTargetsToday === 0) {
+  if (copyLeaderCount === 0) {
     blockers.push("No traders meet COPY criteria today");
   }
 
@@ -120,7 +125,7 @@ export async function computeLiveCopyReadiness(): Promise<LiveCopyReadinessRepor
     liveGatesEnabled &&
     credentialsConfigured &&
     clobImplementationReady &&
-    copyTargetsToday > 0;
+    copyTargetsToday > 0 || scanCopyLeaders > 0;
 
   return {
     ready,

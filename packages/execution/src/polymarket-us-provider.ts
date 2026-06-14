@@ -213,12 +213,57 @@ export class PolymarketUsExecutionProvider implements ExecutionProvider {
 
   async closePosition(
     positionId: string,
-    _fraction?: number,
-  ): Promise<{ success: boolean; errorMessage?: string }> {
+    fraction?: number,
+  ): Promise<{ success: boolean; fillPrice?: number; errorMessage?: string }> {
     try {
       const client = getPolymarketUsClient();
+      const marketSlug = positionId;
+
+      if (fraction != null && fraction > 0 && fraction < 0.999) {
+        const res = await client.portfolio.positions({ market: marketSlug });
+        const pos = res.positions?.[marketSlug];
+        if (!pos) {
+          return { success: false, errorMessage: "no US position to reduce" };
+        }
+        const cashValue = Number(pos.cashValue?.value ?? pos.cost?.value ?? 0);
+        if (cashValue <= 0) {
+          return { success: false, errorMessage: "US position has zero notional" };
+        }
+        const sellUsd = Math.max(0.5, cashValue * fraction);
+        const net = Number(pos.netPosition ?? 0);
+        const intent =
+          net >= 0 ? "ORDER_INTENT_SELL_LONG" : "ORDER_INTENT_SELL_SHORT";
+
+        const response = await client.orders.create({
+          marketSlug,
+          intent,
+          type: "ORDER_TYPE_MARKET",
+          tif: "TIME_IN_FORCE_FILL_OR_KILL",
+          synchronousExecution: true,
+          manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
+          cashOrderQty: { value: sellUsd.toFixed(2), currency: "USD" },
+        });
+
+        if (!response.id) {
+          return { success: false, errorMessage: "partial sell rejected (no order id)" };
+        }
+
+        const verified = await verifyUsOrderFill(
+          client,
+          response.id,
+          marketSlug,
+          response.executions as Parameters<typeof verifyUsOrderFill>[3],
+          true,
+        );
+        return {
+          success: verified.success,
+          fillPrice: verified.fillPrice,
+          errorMessage: verified.errorMessage,
+        };
+      }
+
       await client.orders.closePosition({
-        marketSlug: positionId,
+        marketSlug,
         synchronousExecution: true,
         manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
       });

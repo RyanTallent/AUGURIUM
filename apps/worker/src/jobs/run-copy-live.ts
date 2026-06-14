@@ -10,6 +10,11 @@ import {
   getLiveCopySizingConfig,
   sumOpenExposureUsd,
   canAddDeployedExposure,
+  evaluateCopyLiveLadder,
+  getCopyLiveLadderConfig,
+  ladderStateAfterRung,
+  viewLadderState,
+  type CopyLiveLadderAction,
 } from "@augurium/copy-trading";
 import {
   createExecutionProvider,
@@ -129,6 +134,170 @@ async function closeMirrorOnUs(params: {
   return "closed";
 }
 
+async function initMirrorLadderState(mirrorId: string, originalSizeUsd: number): Promise<void> {
+  const config = getCopyLiveLadderConfig();
+  await prisma.copyLiveLadderState.upsert({
+    where: { mirrorId },
+    create: {
+      mirrorId,
+      rungsCompleted: 0,
+      remainingPct: 1,
+      nextRungPct: config.rung1LeaderRoi,
+      metadata: { originalSizeUsd },
+    },
+    update: {
+      remainingPct: 1,
+      nextRungPct: config.rung1LeaderRoi,
+      metadata: { originalSizeUsd },
+    },
+  });
+  await prisma.copyLiveMirror.update({
+    where: { id: mirrorId },
+    data: { ladderState: "active", ladderStep: 0 },
+  });
+}
+
+/** Partial US sell at a ladder rung; mirror stays OPEN until leader exits. */
+async function partialSellMirrorOnUs(params: {
+  provider: ExecutionProvider;
+  client: ReturnType<typeof getPolymarketUsClient>;
+  mirror: LiveMirrorRow;
+  action: CopyLiveLadderAction;
+}): Promise<"sold" | "failed" | "skipped"> {
+  const { provider, client, mirror, action } = params;
+  if (mirror.status !== "OPEN") return "skipped";
+
+  const slug = await resolveMirrorUsSlug(mirror);
+  if (!slug) return "skipped";
+
+  const before = await hasUsPositionOnMarket(client, slug);
+  if (!before.ok || before.sizeUsd <= 0) return "skipped";
+
+  const sellUsd = Math.min(action.sellUsd, before.sizeUsd * 0.98);
+  if (sellUsd < 0.5) return "skipped";
+
+  const fraction = Math.min(0.99, sellUsd / before.sizeUsd);
+  console.log(
+    `[worker] live copy partial sell rung=${action.rung} slug=${slug} sellUsd=${sellUsd.toFixed(2)} leaderRoi=${(action.leaderRoi * 100).toFixed(1)}%`,
+  );
+
+  const sellResult = await provider.closePosition(slug, fraction);
+  if (!sellResult.success) {
+    await notifyLiveCopyTrade({
+      kind: "blocked",
+      mirrorId: mirror.id,
+      marketTitle: mirror.market.title,
+      side: mirror.side,
+      sizeUsd: sellUsd,
+      entryPrice: mirror.entryPrice,
+      traderAddress: mirror.trader.address,
+      blockReason: `partial sell rung ${action.rung} failed: ${sellResult.errorMessage ?? "closePosition failed"}`,
+    });
+    return "failed";
+  }
+
+  const ladderRow = await prisma.copyLiveLadderState.findUnique({
+    where: { mirrorId: mirror.id },
+  });
+  const view = viewLadderState({
+    rungsCompleted: ladderRow?.rungsCompleted ?? 0,
+    remainingPct: ladderRow?.remainingPct ?? 1,
+    metadata: ladderRow?.metadata,
+    requestedSizeUsd: mirror.requestedSizeUsd,
+  });
+  const next = ladderStateAfterRung(view, action);
+
+  await prisma.copyLiveLadderState.upsert({
+    where: { mirrorId: mirror.id },
+    create: {
+      mirrorId: mirror.id,
+      rungsCompleted: next.rungsCompleted,
+      remainingPct: next.remainingPct,
+      nextRungPct: next.nextRungPct,
+      metadata: { originalSizeUsd: view.originalSizeUsd },
+    },
+    update: {
+      rungsCompleted: next.rungsCompleted,
+      remainingPct: next.remainingPct,
+      nextRungPct: next.nextRungPct,
+    },
+  });
+  await prisma.copyLiveMirror.update({
+    where: { id: mirror.id },
+    data: {
+      ladderStep: action.rung,
+      ladderState: next.remainingPct <= 0.01 ? "complete" : "active",
+    },
+  });
+
+  await notifyLiveCopyTrade({
+    kind: "partial",
+    mirrorId: mirror.id,
+    marketTitle: mirror.market.title,
+    side: mirror.side,
+    sizeUsd: sellUsd,
+    entryPrice: mirror.entryPrice,
+    traderAddress: mirror.trader.address,
+    ladderRung: action.rung,
+    blockReason: `leader ROI ${(action.leaderRoi * 100).toFixed(1)}% — sold ${(action.sellPctOfOriginal * 100).toFixed(0)}% of original`,
+  });
+
+  return "sold";
+}
+
+async function processCopyLiveLadders(params: {
+  provider: ExecutionProvider;
+  client: ReturnType<typeof getPolymarketUsClient>;
+}): Promise<number> {
+  const { provider, client } = params;
+  const config = getCopyLiveLadderConfig();
+  if (!config.enabled) return 0;
+
+  const openMirrors = await prisma.copyLiveMirror.findMany({
+    where: { status: "OPEN" },
+    include: {
+      trader: { select: { address: true } },
+      market: { select: { title: true, slug: true, category: true } },
+    },
+  });
+
+  let partials = 0;
+  for (const m of openMirrors) {
+    const source = await prisma.position.findUnique({
+      where: { externalKey: m.sourcePositionKey },
+      select: { pnl: true, size: true, avgPrice: true, status: true },
+    });
+    if (!source || source.status !== "open") continue;
+
+    const roi = leaderPositionRoi(source.pnl, source.size, source.avgPrice);
+    const ladderRow = await prisma.copyLiveLadderState.findUnique({
+      where: { mirrorId: m.id },
+    });
+    const view = viewLadderState({
+      rungsCompleted: ladderRow?.rungsCompleted ?? m.ladderStep ?? 0,
+      remainingPct: ladderRow?.remainingPct ?? 1,
+      metadata: ladderRow?.metadata,
+      requestedSizeUsd: m.requestedSizeUsd,
+    });
+
+    const action = evaluateCopyLiveLadder(roi, view, config);
+    if (!action) continue;
+
+    const result = await partialSellMirrorOnUs({
+      provider,
+      client,
+      mirror: m,
+      action,
+    });
+    if (result === "sold") partials++;
+  }
+
+  if (partials > 0) {
+    console.log(`[worker] live copy ladder partial sells=${partials}`);
+  }
+  return partials;
+}
+
 async function reconcileSubmittedMirrors(): Promise<number> {
   const cfg = getExecutionConfig();
   if (cfg.provider !== "polymarket-us" || !isPolymarketUsReady()) return 0;
@@ -171,6 +340,7 @@ async function reconcileSubmittedMirrors(): Promise<number> {
         where: { id: m.id },
         data: { status: "OPEN", openedAt: new Date() },
       });
+      await initMirrorLadderState(m.id, m.requestedSizeUsd);
       promoted++;
     } else {
       await prisma.copyLiveMirror.update({
@@ -290,8 +460,10 @@ async function reconcileStaleOpenMirrors(): Promise<number> {
 const ENABLED = process.env.LIVE_COPY_ENABLED === "true";
 const USE_PAPER_SOURCE = process.env.LIVE_COPY_USE_PAPER_SOURCE === "true";
 const CLOSE_ON_LEADER_EXIT = process.env.LIVE_COPY_CLOSE_ON_EXIT !== "false";
+const LADDER_CONFIG = getCopyLiveLadderConfig();
 const TAKE_PROFIT_PCT = Number(process.env.COPY_LIVE_TAKE_PROFIT_PCT ?? "0.2");
-const TAKE_PROFIT_ENABLED = process.env.COPY_LIVE_TAKE_PROFIT_ENABLED !== "false";
+const TAKE_PROFIT_ENABLED =
+  !LADDER_CONFIG.enabled && process.env.COPY_LIVE_TAKE_PROFIT_ENABLED !== "false";
 const MAX_ORDERS_PER_RUN = Number(process.env.COPY_LIVE_MAX_ORDERS_PER_RUN ?? "20");
 
 export interface CopyLiveJobSummary {
@@ -463,7 +635,9 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         }
       }
 
-      if (TAKE_PROFIT_ENABLED && client && TAKE_PROFIT_PCT > 0) {
+      if (LADDER_CONFIG.enabled && client) {
+        await processCopyLiveLadders({ provider, client });
+      } else if (TAKE_PROFIT_ENABLED && client && TAKE_PROFIT_PCT > 0) {
         const openForProfit = await prisma.copyLiveMirror.findMany({
           where: { status: "OPEN" },
           include: {
@@ -780,6 +954,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           },
         });
         mirrorsSubmitted++;
+        await initMirrorLadderState(mirror.id, filledUsd);
         await notifyLiveCopyTrade({
           kind: "filled",
           mirrorId: mirror.id,

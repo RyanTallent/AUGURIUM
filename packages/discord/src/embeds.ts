@@ -212,7 +212,7 @@ export function buildWeeklyReportEmbed(input: {
 }
 
 export function buildLiveCopyTradeEmbed(input: {
-  kind: "filled" | "blocked" | "closed";
+  kind: "filled" | "blocked" | "closed" | "partial";
   marketTitle: string;
   side: string;
   sizeUsd: number;
@@ -220,17 +220,20 @@ export function buildLiveCopyTradeEmbed(input: {
   traderAddress: string;
   providerOrderId?: string | null;
   blockReason?: string | null;
+  ladderRung?: 1 | 2;
   dashboardUrl: string;
 }): DiscordEventPayload {
   const titleByKind = {
     filled: "TRADE ENTER",
     blocked: "TRADE PROBLEM",
     closed: "TRADE EXIT",
+    partial: "PARTIAL EXIT",
   } as const;
   const colorByKind = {
     filled: COLORS.liveCopy,
     blocked: COLORS.liveBlocked,
     closed: COLORS.liveClosed,
+    partial: COLORS.liveClosed,
   } as const;
   const trader = `\`${input.traderAddress.slice(0, 6)}…${input.traderAddress.slice(-4)}\``;
 
@@ -239,7 +242,9 @@ export function buildLiveCopyTradeEmbed(input: {
     description:
       input.kind === "filled"
         ? `Position opened on Polymarket US (verified fill) · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
-        : `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
+        : input.kind === "partial"
+          ? `Ladder rung ${input.ladderRung ?? "?"} partial sell · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
+          : `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
     color: colorByKind[input.kind],
     url: input.dashboardUrl,
     fields: [
@@ -248,6 +253,9 @@ export function buildLiveCopyTradeEmbed(input: {
       { name: "Size", value: `$${input.sizeUsd.toFixed(2)}`, inline: true },
       ...(input.providerOrderId
         ? [{ name: "Order ID", value: input.providerOrderId.slice(0, 120) }]
+        : []),
+      ...(input.kind === "partial" && input.ladderRung
+        ? [{ name: "Ladder rung", value: String(input.ladderRung), inline: true }]
         : []),
       ...(input.blockReason
         ? [{ name: "Reason", value: input.blockReason.slice(0, 900) }]

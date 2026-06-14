@@ -277,6 +277,18 @@ services:
         value: "true"
       - key: COPY_LIVE_TAKE_PROFIT_PCT
         value: "0.2"
+      - key: COPY_LIVE_LADDER_ENABLED
+        value: "true"
+      - key: COPY_LIVE_LADDER_RUNG1_ROI
+        value: "0.15"
+      - key: COPY_LIVE_LADDER_RUNG1_SELL_PCT
+        value: "0.25"
+      - key: COPY_LIVE_LADDER_RUNG2_ROI
+        value: "0.20"
+      - key: COPY_LIVE_LADDER_RUNG2_SELL_PCT
+        value: "0.50"
+      - key: COPY_LIVE_TAKE_PROFIT_ENABLED
+        value: "false"
       - key: COPY_LIVE_POSITION_PCT
         value: "0.05"
       - key: COPY_LIVE_MAX_DEPLOYED_PCT

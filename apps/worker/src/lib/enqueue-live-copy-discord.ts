@@ -19,7 +19,7 @@ export function isSilentLiveCopyBlockReason(reason: string | null | undefined): 
 }
 
 export async function notifyLiveCopyTrade(input: {
-  kind: "filled" | "blocked" | "closed";
+  kind: "filled" | "blocked" | "closed" | "partial";
   mirrorId: string;
   marketTitle: string;
   side: string;
@@ -28,6 +28,7 @@ export async function notifyLiveCopyTrade(input: {
   traderAddress: string;
   providerOrderId?: string | null;
   blockReason?: string | null;
+  ladderRung?: 1 | 2;
 }): Promise<"queued" | "skipped" | "already_sent"> {
   const config = getDiscordConfig(process.env);
   if (!config.canSend) {
@@ -44,9 +45,14 @@ export async function notifyLiveCopyTrade(input: {
       ? "EXECUTION_LIVE"
       : input.kind === "blocked"
         ? "EXECUTION_BLOCKED"
-        : "COPY_LIVE_CLOSED";
+        : input.kind === "partial"
+          ? "COPY_LIVE_PARTIAL"
+          : "COPY_LIVE_CLOSED";
 
-  const dedupeKey = `copy:live:${input.kind}:${input.mirrorId}`;
+  const dedupeKey =
+    input.kind === "partial"
+      ? `copy:live:partial:${input.mirrorId}:rung${input.ladderRung ?? 0}`
+      : `copy:live:${input.kind}:${input.mirrorId}`;
 
   const existing = await prisma.discordEvent.findUnique({
     where: { dedupeKey },
@@ -62,9 +68,11 @@ export async function notifyLiveCopyTrade(input: {
     title:
       input.kind === "filled"
         ? `TRADE ENTER: ${input.marketTitle.slice(0, 48)}`
-        : input.kind === "closed"
-          ? `TRADE EXIT: ${input.marketTitle.slice(0, 48)}`
-          : `TRADE PROBLEM: ${input.marketTitle.slice(0, 48)}`,
+        : input.kind === "partial"
+          ? `PARTIAL EXIT (rung ${input.ladderRung ?? "?"}): ${input.marketTitle.slice(0, 40)}`
+          : input.kind === "closed"
+            ? `TRADE EXIT: ${input.marketTitle.slice(0, 48)}`
+            : `TRADE PROBLEM: ${input.marketTitle.slice(0, 48)}`,
     payload: buildLiveCopyTradeEmbed({
       ...input,
       dashboardUrl: `${config.dashboardBaseUrl}/copy`,
@@ -74,7 +82,7 @@ export async function notifyLiveCopyTrade(input: {
   if (status === "PENDING") {
     const sent = await dispatchLiveCopyDiscordEvents();
     console.log(
-      `[discord] ${input.kind === "filled" ? "TRADE ENTER" : input.kind === "closed" ? "TRADE EXIT" : "TRADE PROBLEM"} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} sent=${sent}`,
+      `[discord] ${input.kind === "filled" ? "TRADE ENTER" : input.kind === "partial" ? "PARTIAL EXIT" : input.kind === "closed" ? "TRADE EXIT" : "TRADE PROBLEM"} mirror=${input.mirrorId} trader=${input.traderAddress.slice(0, 10)} sent=${sent}`,
     );
     return "queued";
   }

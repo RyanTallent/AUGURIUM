@@ -15,7 +15,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
-    "test": "npx tsx --test src/copy-decision.test.ts src/copy-risk.test.ts"
+    "test": "npx tsx --test src/copy-decision.test.ts src/copy-risk.test.ts src/copy-live-ladder.test.ts"
   },
   "dependencies": {
     "@augurium/database": "*",
