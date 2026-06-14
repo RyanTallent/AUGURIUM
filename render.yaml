@@ -219,6 +219,10 @@ services:
         value: "false"
       - key: POLYMARKET_SCAN_WALLET_BATCH
         value: "10"
+      - key: US_MARKET_CATALOG_WARM_MIN
+        value: "3000"
+      - key: US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN
+        value: "80"
       - key: COPY_AUTO_PIPELINE_ENABLED
         value: "true"
       - key: PAPER_COPY_ENABLED
