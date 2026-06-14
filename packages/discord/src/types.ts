@@ -29,7 +29,12 @@ export type DiscordEventType =
   | "EXECUTION_RECONCILIATION"
   | "COPY_LIVE_CLOSED"
   | "COPY_LIVE_PARTIAL"
-  | "PORTFOLIO_HEALTH";
+  | "PORTFOLIO_HEALTH"
+  | "COPY_WEEKLY_STOP"
+  | "RISK_ALERT"
+  | "BRAIN_UPDATE"
+  | "INVESTMENT_JOURNAL"
+  | "JOURNAL_ENTRY";
 
 export interface DiscordEmbedField {
   name: string;

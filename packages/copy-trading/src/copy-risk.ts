@@ -9,7 +9,7 @@ function readPctEnv(name: string, fallback: number): number {
 }
 
 export const COPY_RISK_LIMITS = {
-  maxCapitalPerTraderPct: readPctEnv("COPY_MAX_CAPITAL_PER_TRADER_PCT", 0.05),
+  maxCapitalPerTraderPct: readPctEnv("COPY_MAX_CAPITAL_PER_TRADER_PCT", 0.5),
   maxCapitalPerMarketPct: readPctEnv("COPY_MAX_CAPITAL_PER_MARKET_PCT", 0.2),
   maxCapitalPerCategoryPct: readPctEnv("COPY_MAX_CAPITAL_PER_CATEGORY_PCT", 0.2),
   maxCapitalPerEventPct: readPctEnv("COPY_MAX_CAPITAL_PER_EVENT_PCT", 0.3),

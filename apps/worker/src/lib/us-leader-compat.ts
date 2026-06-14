@@ -1,48 +1,24 @@
 import { prisma } from "@augurium/database";
 import { evaluateUsCompatibilityGate } from "@augurium/execution";
-import { isUsOnlyLiveCopyMode, isUsBroadIntelMode } from "@augurium/shared";
+import { isUsOnlyLiveCopyMode } from "@augurium/shared";
 import { polymarketScanFetch, type ScanWalletTrade } from "./polymarket-scan.js";
 
-const US_LIKELY_PATTERNS = [
-  /\bcounter-strike\b/i,
-  /\bvalorant\b/i,
-  /\bdota\s*2?\b/i,
-  /\bleague of legends\b/i,
-  /\bcs2\b/i,
-  /\bmlb\b/i,
-  /\bnba\b/i,
-  /\bnfl\b/i,
-  /\bnhl\b/i,
-  /\bsoccer\b/i,
-  /\btennis\b/i,
-  /\besports\b/i,
-  /\bpresident\b/i,
-  /\belection\b/i,
-  /\bsuper bowl\b/i,
-  /\bworld series\b/i,
-  /\btemperature\b/i,
-  /\bweather\b/i,
-];
-
-const MAX_FULL_GATE_POSITIONS = Number(process.env.COPY_US_COMPAT_MAX_GATE_CHECKS ?? "2");
-const MAX_FULL_GATE_LEADERS = Number(process.env.COPY_US_COMPAT_MAX_LEADERS ?? "5");
+const MAX_FULL_GATE_POSITIONS = Number(process.env.COPY_US_COMPAT_MAX_GATE_CHECKS ?? "3");
+const MAX_FULL_GATE_LEADERS = Number(process.env.COPY_US_COMPAT_MAX_LEADERS ?? "15");
 
 export function isLikelyGlobalOnlyMarketTitle(_title: string): boolean {
   return false;
 }
 
-export function isLikelyUsOverlapMarketTitle(title: string): boolean {
-  if (isLikelyGlobalOnlyMarketTitle(title)) return false;
-  const norm = title.toLowerCase();
-  if (norm.includes(" vs ") || norm.includes(" vs. ")) return true;
-  return US_LIKELY_PATTERNS.some((p) => p.test(norm));
+export function isLikelyUsOverlapMarketTitle(_title: string): boolean {
+  return true;
 }
 
+/** Pre-filter positions/leaders through US catalog gate (default on for US live copy). */
 export function usLeaderCompatRequired(): boolean {
   if (process.env.COPY_US_REQUIRE_COMPAT_POSITION === "true") return isUsOnlyLiveCopyMode();
   if (process.env.COPY_US_REQUIRE_COMPAT_POSITION === "false") return false;
-  // Default off when broad intel is on (matches relaxed US slug matching).
-  return isUsOnlyLiveCopyMode() && !isUsBroadIntelMode();
+  return isUsOnlyLiveCopyMode();
 }
 
 function netOpenTitlesFromTrades(trades: ScanWalletTrade[]): Array<{
@@ -125,44 +101,22 @@ async function loadOpenPositionCandidates(
   }));
 }
 
-function scoreCandidatesFast(
-  candidates: Array<{
-    marketId: string;
-    title: string;
-    slug: string | null;
-    category: string | null;
-  }>,
-): UsLeaderCompatScore {
-  let likelyGlobalOnly = 0;
-  let usCompatible = 0;
-
-  for (const pos of candidates) {
-    if (isLikelyGlobalOnlyMarketTitle(pos.title)) {
-      likelyGlobalOnly++;
-      continue;
-    }
-    if (isLikelyUsOverlapMarketTitle(pos.title)) usCompatible++;
-  }
-
-  return {
-    openPositions: candidates.length,
-    likelyGlobalOnly,
-    usCompatible,
-    bestConfidence: usCompatible > 0 ? 0.75 : 0,
-    hasTradeableUsPosition: usCompatible > 0,
-  };
-}
-
-/** Fast heuristic only — safe for PolymarketScan ingest (no US API calls). */
+/** Fast ingest path — no US API; full gate runs at leader pick / live copy. */
 export async function scoreTraderUsLiveCompatFast(
   traderId: string,
   address: string,
 ): Promise<UsLeaderCompatScore> {
   const candidates = await loadOpenPositionCandidates(traderId, address, true);
-  return scoreCandidatesFast(candidates);
+  return {
+    openPositions: candidates.length,
+    likelyGlobalOnly: 0,
+    usCompatible: 0,
+    bestConfidence: 0,
+    hasTradeableUsPosition: false,
+  };
 }
 
-/** Full US gate — use sparingly (live copy leader pick / position filter). */
+/** Full US catalog gate — strict ≥0.90 confidence required. */
 export async function scoreTraderUsLiveCompat(
   traderId: string,
   address: string,
@@ -172,19 +126,10 @@ export async function scoreTraderUsLiveCompat(
     return scoreTraderUsLiveCompatFast(traderId, address);
   }
 
-  const fast = scoreCandidatesFast(candidates);
-  if (fast.openPositions > 0 && fast.usCompatible === 0) {
-    return fast;
-  }
-
   let usCompatible = 0;
-  let bestConfidence = fast.bestConfidence;
-  let likelyGlobalOnly = fast.likelyGlobalOnly;
+  let bestConfidence = 0;
 
-  const toCheck = candidates
-    .filter((p) => !isLikelyGlobalOnlyMarketTitle(p.title))
-    .slice(0, MAX_FULL_GATE_POSITIONS);
-
+  const toCheck = candidates.slice(0, MAX_FULL_GATE_POSITIONS);
   for (const pos of toCheck) {
     const gate = await evaluateUsCompatibilityGate({
       globalMarketId: pos.marketId,
@@ -199,15 +144,15 @@ export async function scoreTraderUsLiveCompat(
 
   return {
     openPositions: candidates.length,
-    likelyGlobalOnly,
-    usCompatible: Math.max(usCompatible, fast.usCompatible),
+    likelyGlobalOnly: 0,
+    usCompatible,
     bestConfidence,
-    hasTradeableUsPosition: usCompatible > 0 || fast.hasTradeableUsPosition,
+    hasTradeableUsPosition: usCompatible > 0 && bestConfidence >= 0.9,
   };
 }
 
 export function maxFullGateLeaders(): number {
   return Number.isFinite(MAX_FULL_GATE_LEADERS) && MAX_FULL_GATE_LEADERS > 0
     ? MAX_FULL_GATE_LEADERS
-    : 5;
+    : 15;
 }

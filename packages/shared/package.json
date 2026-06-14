@@ -15,6 +15,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test dist/us-copy-mode.test.js",
     "prepare": "npm run build"
   },
   "devDependencies": {

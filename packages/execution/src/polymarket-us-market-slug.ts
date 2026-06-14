@@ -1,32 +1,9 @@
+import { getUsCompatMinConfidence } from "@augurium/shared";
 import { getPolymarketUsClient, getPolymarketUsPublicClient, isPolymarketUsReady } from "./polymarket-us-client.js";
 import { prisma } from "@augurium/database";
 
-function isUsBroadIntelLocal(): boolean {
-  const env = process.env;
-  if (env.COPY_US_BROAD_INTEL === "false" || env.COPY_US_BROAD_INTEL === "0") return false;
-  if (env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1") return true;
-  return env.EXECUTION_PROVIDER === "polymarket-us" && env.LIVE_COPY_ENABLED === "true";
-}
-
 export function getUsMatchMinConfidence(): number {
-  const raw = process.env.US_COMPAT_MIN_CONFIDENCE;
-  if (raw != null && raw.trim() !== "") {
-    const n = Number(raw);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return isUsBroadIntelLocal() ? 0.75 : 0.9;
-}
-
-function shouldTryGlobalSlugOnUs(): boolean {
-  if (process.env.US_COMPAT_TRY_GLOBAL_SLUG === "false") return false;
-  if (process.env.US_COMPAT_TRY_GLOBAL_SLUG === "true") return true;
-  return isUsBroadIntelLocal();
-}
-
-function shouldRelaxUsSlugMatch(): boolean {
-  if (process.env.US_COMPAT_RELAXED_SLUG === "false") return false;
-  if (process.env.US_COMPAT_RELAXED_SLUG === "true") return true;
-  return isUsBroadIntelLocal();
+  return getUsCompatMinConfidence();
 }
 
 export interface UsMarketLookup {
@@ -162,183 +139,6 @@ function readUsMarketTitle(retrieved: {
   );
 }
 
-function stripPropSuffix(slug: string): string {
-  return slug.replace(/-game\d+.*$/i, "").replace(/-total-games.*$/i, "");
-}
-
-function buildUsSlugCandidates(globalSlug: string): string[] {
-  const trimmed = globalSlug.trim();
-  if (!trimmed) return [];
-
-  const base = stripPropSuffix(trimmed);
-  const candidates = new Set<string>([trimmed, base, `aec-${base}`, `aec-${trimmed}`]);
-
-  for (const prefix of ["val", "cs2", "dota2", "lol", "cod"] as const) {
-    if (!base.startsWith(`${prefix}-`)) continue;
-    const rest = base.slice(prefix.length + 1);
-    const sport = prefix === "val" ? "valorant" : prefix;
-    candidates.add(`aec-${sport}-${rest}`);
-  }
-
-  return [...candidates];
-}
-
-function buildSearchQueries(title: string): string[] {
-  const queries = new Set<string>();
-  const trimmed = title.trim();
-  if (trimmed) queries.add(trimmed.slice(0, 120));
-
-  const matchup = extractEsportsMatchup(title);
-  if (matchup) {
-    queries.add(matchup.slice(0, 120));
-    const sides = matchup.split(/\s+vs\.?\s+/);
-    if (sides.length === 2) {
-      queries.add(`${sides[0]} ${sides[1]}`.slice(0, 120));
-      for (const side of sides) {
-        const team = side.trim();
-        if (team.length >= 3) queries.add(team.slice(0, 80));
-      }
-    }
-  }
-
-  const norm = normalizeTitle(title);
-  if (norm.includes("valorant")) queries.add("valorant");
-  if (norm.includes("counter-strike") || norm.includes("cs2")) queries.add("cs2");
-  if (norm.includes("dota")) queries.add("dota2");
-  if (norm.includes("temperature") || norm.includes("°")) {
-    queries.add("temperature");
-    const cityMatch = title.match(/\bin\s+([^,?]+?)(?:\s+be|\s+between|\?)/i);
-    if (cityMatch) {
-      const city = cityMatch[1].trim();
-      if (city.length >= 3) queries.add(city.slice(0, 80));
-    }
-  }
-
-  return [...queries];
-}
-
-function readSearchMarketTitle(market: { title?: string; question?: string }): string {
-  return market.title ?? market.question ?? "";
-}
-
-function isUsMoneylineSlug(slug: string): boolean {
-  if (!slug.startsWith("aec-")) return false;
-  return !/-game\d|-total|-handicap|-round-|-kill-|-spread|-o-u|-neg-|-pos-/i.test(slug);
-}
-
-function slugMatchScore(slug: string): number {
-  let score = 0;
-  if (slug.startsWith("aec-")) score += 10;
-  if (isUsMoneylineSlug(slug)) score += 20;
-  return score;
-}
-
-function buildUsEventSlugCandidates(globalSlug: string): string[] {
-  const base = stripPropSuffix(globalSlug.trim());
-  const match = base.match(/^(val|cs2|dota2|lol|cod)-(.+)-(\d{4}-\d{2}-\d{2})$/);
-  if (!match) return [];
-
-  const [, sportPrefix, middle, date] = match;
-  const sport = sportPrefix === "val" ? "valorant" : sportPrefix;
-  const teams = middle.split("-");
-  const stripDigits = (token: string) => token.replace(/\d+/g, "");
-
-  return [
-    `${sport}-${middle}-${date}`,
-    `${sport}-${teams.map(stripDigits).join("-")}-${date}`,
-  ];
-}
-
-function pickBestMarketSlug(
-  expectedTitle: string,
-  markets: Array<{ slug?: string; title?: string; question?: string; active?: boolean; closed?: boolean }>,
-  eventTitle?: string,
-): string | null {
-  let bestSlug: string | null = null;
-  let bestScore = -1;
-
-  for (const m of markets) {
-    if (!m.slug || !m.active || m.closed) continue;
-
-    const marketTitle = readSearchMarketTitle(m);
-    const matches =
-      usMarketTitlesMatch(expectedTitle, marketTitle) ||
-      (eventTitle ? usMarketTitlesMatch(expectedTitle, eventTitle) : false);
-    if (!matches) continue;
-
-    const score = slugMatchScore(m.slug);
-    if (score > bestScore) {
-      bestScore = score;
-      bestSlug = m.slug;
-    }
-  }
-
-  return bestSlug;
-}
-
-async function tryEventSlugCandidates(
-  client: ReturnType<typeof getPolymarketUsClient>,
-  globalSlug: string,
-  expectedTitle: string,
-): Promise<string | null> {
-  for (const eventSlug of buildUsEventSlugCandidates(globalSlug)) {
-    try {
-      const retrieved = await client.events.retrieveBySlug(eventSlug);
-      const event = retrieved.event;
-      if (!event) continue;
-
-      const slug = pickBestMarketSlug(expectedTitle, event.markets ?? [], event.title);
-      if (slug) return slug;
-    } catch {
-      // Try next candidate.
-    }
-  }
-  return null;
-}
-
-async function lookupActiveUsMarketBySlug(
-  client: ReturnType<typeof getPolymarketUsClient>,
-  globalSlug: string,
-): Promise<{ slug: string; usTitle: string } | null> {
-  for (const candidate of buildUsSlugCandidates(globalSlug)) {
-    try {
-      const retrieved = await client.markets.retrieveBySlug(candidate);
-      const market = retrieved.market;
-      if (!market || market.closed || market.active === false) continue;
-      return { slug: candidate, usTitle: readUsMarketTitle(retrieved) };
-    } catch {
-      // Try next candidate.
-    }
-  }
-  return null;
-}
-
-async function trySlugCandidates(
-  client: ReturnType<typeof getPolymarketUsClient>,
-  globalSlug: string,
-  expectedTitle: string,
-  acceptActiveWithoutTitleMatch = false,
-): Promise<string | null> {
-  for (const candidate of buildUsSlugCandidates(globalSlug)) {
-    try {
-      const retrieved = await client.markets.retrieveBySlug(candidate);
-      const market = retrieved.market;
-      if (market?.closed || market?.active === false) continue;
-
-      const usTitle = readUsMarketTitle(retrieved);
-      if (usMarketTitlesMatch(expectedTitle, usTitle) || acceptActiveWithoutTitleMatch) {
-        return candidate;
-      }
-      console.warn(
-        `[execution] rejected US slug ${candidate} — title mismatch expected="${expectedTitle}" us="${usTitle}"`,
-      );
-    } catch {
-      // Try next candidate.
-    }
-  }
-  return null;
-}
-
 function titleMatchConfidence(expectedTitle: string, usTitle: string): number {
   if (!usMarketTitlesMatch(expectedTitle, usTitle)) return 0;
   const expected = normalizeTitle(expectedTitle);
@@ -348,7 +148,7 @@ function titleMatchConfidence(expectedTitle: string, usTitle: string): number {
     .split(/\s+/)
     .map((t) => t.replace(/[^a-z0-9.+-]/g, ""))
     .filter((t) => t.length > 2);
-  if (tokens.length === 0) return 0.7;
+  if (tokens.length === 0) return 0;
   const matched = tokens.filter((t) => actual.includes(t)).length;
   return Math.min(0.99, 0.6 + (matched / tokens.length) * 0.35);
 }
@@ -357,7 +157,6 @@ async function verifyUsMarketActive(
   client: ReturnType<typeof getPolymarketUsClient>,
   slug: string,
   expectedTitle: string,
-  trustActiveSlug = false,
 ): Promise<{ ok: boolean; usTitle: string; confidence: number }> {
   try {
     const retrieved = await client.markets.retrieveBySlug(slug);
@@ -367,10 +166,8 @@ async function verifyUsMarketActive(
     }
     const usTitle = readUsMarketTitle(retrieved);
     const confidence = titleMatchConfidence(expectedTitle, usTitle);
-    if (trustActiveSlug) {
-      return { ok: true, usTitle, confidence: Math.max(confidence, 0.9) };
-    }
-    return { ok: confidence >= getUsMatchMinConfidence(), usTitle, confidence };
+    const minConfidence = getUsMatchMinConfidence();
+    return { ok: confidence >= minConfidence, usTitle, confidence };
   } catch {
     return { ok: false, usTitle: "", confidence: 0 };
   }
@@ -408,7 +205,7 @@ function extractCatalogSearchTokens(title: string): string[] {
   return [...new Set(tokens)].slice(0, 8);
 }
 
-/** Match leader global market metadata against US catalog rows (no global slug translation). */
+/** Match PolymarketScan leader title to Polymarket US catalog ONLY. */
 export async function matchUsMarketFromCatalog(
   leader: UsMarketLookup,
 ): Promise<UsCompatibilityMatch> {
@@ -463,215 +260,48 @@ export async function matchUsMarketFromCatalog(
   return best;
 }
 
-async function searchUsApiExactTitle(
-  client: ReturnType<typeof getPolymarketUsClient>,
-  expectedTitle: string,
-): Promise<UsCompatibilityMatch> {
-  const expectedNorm = normalizeTitle(expectedTitle);
-  const queries = buildSearchQueries(expectedTitle);
-  let best: UsCompatibilityMatch = {
-    slug: null,
-    confidence: 0,
-    reason: "no exact US API title match",
-  };
-
-  for (const query of queries) {
-    try {
-      const search = await client.search.query({ query, limit: 32, status: "active" });
-      for (const event of search.events ?? []) {
-        for (const m of event.markets ?? []) {
-          if (!m.slug || !m.active || m.closed) continue;
-          const marketTitle = readSearchMarketTitle(m as { title?: string; question?: string });
-          const marketNorm = normalizeTitle(marketTitle);
-          if (marketNorm !== expectedNorm && !usMarketTitlesMatch(expectedTitle, marketTitle)) {
-            continue;
-          }
-          const confidence =
-            marketNorm === expectedNorm ? 1 : titleMatchConfidence(expectedTitle, marketTitle);
-          if (confidence > best.confidence) {
-            best = {
-              slug: m.slug,
-              confidence,
-              reason:
-                marketNorm === expectedNorm
-                  ? "exact title match"
-                  : `exact US API title search (${(confidence * 100).toFixed(0)}%)`,
-              usTitle: marketTitle,
-            };
-          }
-        }
-      }
-    } catch {
-      // continue queries
-    }
-  }
-
-  return best;
-}
-
-async function searchUsApiByTitle(
-  client: ReturnType<typeof getPolymarketUsClient>,
-  expectedTitle: string,
-): Promise<UsCompatibilityMatch> {
-  const queries = buildSearchQueries(expectedTitle);
-  let best: UsCompatibilityMatch = {
-    slug: null,
-    confidence: 0,
-    reason: "no US API title search match",
-  };
-
-  for (const query of queries) {
-    try {
-      const search = await client.search.query({ query, limit: 24, status: "active" });
-      for (const event of search.events ?? []) {
-        const slug = pickBestMarketSlug(expectedTitle, event.markets ?? [], event.title ?? "");
-        if (!slug) continue;
-        const found = event.markets?.find((m) => m.slug === slug);
-        const marketTitle = found
-          ? readSearchMarketTitle(found as { title?: string; question?: string })
-          : (event.title ?? "");
-        const confidence = titleMatchConfidence(expectedTitle, marketTitle);
-        if (confidence > best.confidence) {
-          best = {
-            slug,
-            confidence,
-            reason: `US API title search (${(confidence * 100).toFixed(0)}%)`,
-            usTitle: marketTitle,
-          };
-        }
-      }
-    } catch {
-      // continue queries
-    }
-  }
-
-  return best;
-}
-
 /**
- * US compatibility gate for live execution.
- * When US_COMPAT_TRY_GLOBAL_SLUG is enabled, tries leader global slug on Polymarket US first.
+ * US compatibility resolver — catalog-only, strict confidence ≥ US_COMPAT_MIN_CONFIDENCE (default 0.90).
+ * Global slugs and API fuzzy search are never used.
  */
 export async function resolveUsMarketForExecution(
   leader: UsMarketLookup,
 ): Promise<UsCompatibilityMatch> {
-  const client = isPolymarketUsReady() ? getPolymarketUsClient() : getPolymarketUsPublicClient();
   const minConfidence = getUsMatchMinConfidence();
-  const tryGlobalSlug = shouldTryGlobalSlugOnUs();
-  const relaxedSlug = shouldRelaxUsSlugMatch();
-
-  if (tryGlobalSlug && leader.slug?.trim()) {
-    const globalSlug = leader.slug.trim();
-    let slugHit = await trySlugCandidates(client, globalSlug, leader.title);
-    let trustSlug = false;
-    if (!slugHit && relaxedSlug) {
-      slugHit = await trySlugCandidates(client, globalSlug, leader.title, true);
-      trustSlug = Boolean(slugHit);
-    }
-    if (!slugHit) {
-      slugHit = await tryEventSlugCandidates(client, globalSlug, leader.title);
-    }
-
-    if (slugHit) {
-      const verified = await verifyUsMarketActive(client, slugHit, leader.title, trustSlug);
-      if (verified.ok) {
-        return {
-          slug: slugHit,
-          confidence: verified.confidence,
-          reason: trustSlug
-            ? `direct US slug (active): ${slugHit}`
-            : `global slug on US: ${slugHit}`,
-          usTitle: verified.usTitle,
-        };
-      }
-    }
-
-    if (relaxedSlug) {
-      const direct = await lookupActiveUsMarketBySlug(client, globalSlug);
-      if (direct) {
-        return {
-          slug: direct.slug,
-          confidence: 0.9,
-          reason: `direct US slug (active): ${direct.slug}`,
-          usTitle: direct.usTitle,
-        };
-      }
-    }
-  }
-
-  const exactSearch = await searchUsApiExactTitle(client, leader.title);
-  if (exactSearch.slug && exactSearch.confidence >= minConfidence) {
-    const verified = await verifyUsMarketActive(client, exactSearch.slug, leader.title);
-    if (verified.ok) {
-      return {
-        slug: exactSearch.slug,
-        confidence: verified.confidence,
-        reason: `api-exact+verified: ${exactSearch.reason}`,
-        usTitle: verified.usTitle,
-      };
-    }
-  }
+  const client = isPolymarketUsReady() ? getPolymarketUsClient() : getPolymarketUsPublicClient();
 
   const catalogMatch = await matchUsMarketFromCatalog(leader);
-  if (catalogMatch.slug && catalogMatch.confidence >= minConfidence) {
-    const verified = await verifyUsMarketActive(client, catalogMatch.slug, leader.title);
-    if (verified.ok) {
-      return {
-        slug: catalogMatch.slug,
-        confidence: verified.confidence,
-        reason: `catalog+verified: ${catalogMatch.reason}`,
-        usTitle: verified.usTitle,
-      };
-    }
-  }
-
-  const searchMatch = await searchUsApiByTitle(client, leader.title);
-  if (searchMatch.slug && searchMatch.confidence >= minConfidence) {
-    const verified = await verifyUsMarketActive(client, searchMatch.slug, leader.title);
-    if (verified.ok) {
-      return {
-        slug: searchMatch.slug,
-        confidence: verified.confidence,
-        reason: `api-search+verified: ${searchMatch.reason}`,
-        usTitle: verified.usTitle,
-      };
-    }
-  }
-
-  const candidates = [exactSearch, catalogMatch, searchMatch].filter((m) => m.slug);
-  const best = candidates.reduce<UsCompatibilityMatch>(
-    (acc, cur) => (cur.confidence > acc.confidence ? cur : acc),
-    { slug: null, confidence: 0, reason: "no US match" },
-  );
-
-  if (best.slug && relaxedSlug && best.confidence >= 0.5) {
-    const verified = await verifyUsMarketActive(client, best.slug, leader.title);
-    if (verified.ok) {
-      return {
-        slug: best.slug,
-        confidence: verified.confidence,
-        reason: `relaxed+verified: ${best.reason}`,
-        usTitle: verified.usTitle,
-      };
-    }
-  }
-
-  if (best.confidence < minConfidence) {
+  if (!catalogMatch.slug || catalogMatch.confidence < minConfidence) {
     return {
       slug: null,
-      confidence: best.confidence,
-      reason: `uncertain match (${(best.confidence * 100).toFixed(0)}% < ${minConfidence * 100}% threshold) — skip`,
+      confidence: catalogMatch.confidence,
+      reason:
+        catalogMatch.confidence > 0
+          ? `uncertain match (${(catalogMatch.confidence * 100).toFixed(0)}% < ${minConfidence * 100}% threshold) — skip`
+          : "no US catalog match — skip",
+    };
+  }
+
+  const verified = await verifyUsMarketActive(client, catalogMatch.slug, leader.title);
+  if (!verified.ok || verified.confidence < minConfidence) {
+    return {
+      slug: null,
+      confidence: verified.confidence,
+      reason: verified.confidence > 0
+        ? `US market failed strict verification (${(verified.confidence * 100).toFixed(0)}%) — skip`
+        : "US market inactive or closed — skip",
     };
   }
 
   return {
-    slug: null,
-    confidence: best.confidence,
-    reason: "US market inactive or failed verification — skip",
+    slug: catalogMatch.slug,
+    confidence: verified.confidence,
+    reason: `catalog+verified: ${catalogMatch.reason}`,
+    usTitle: verified.usTitle,
   };
 }
 
-/** Legacy resolver — prefers stored US slug; avoids global slug translation when possible. */
+/** Legacy resolver — catalog-only strict match. */
 export async function resolveUsMarketSlug(market: UsMarketLookup): Promise<string | null> {
   const match = await resolveUsMarketForExecution(market);
   return match.slug;

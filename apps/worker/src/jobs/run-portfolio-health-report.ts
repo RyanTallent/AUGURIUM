@@ -5,7 +5,7 @@ import {
   sumOpenExposureUsd,
 } from "@augurium/copy-trading";
 import { getExecutionConfig, isPolymarketUsReady } from "@augurium/execution";
-import { buildRiskAlertEmbed, getDiscordConfig, sendDiscordWebhook } from "@augurium/discord";
+import { buildPortfolioEmbed, getDiscordConfig, sendDiscordWebhook } from "@augurium/discord";
 import { queueDiscordEvent } from "../lib/discord-events.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 
@@ -48,10 +48,15 @@ export async function runPortfolioHealthReportJob(): Promise<"sent" | "skipped">
     `Provider: ${cfg.provider} · US ready: ${isPolymarketUsReady()}`,
   ].join("\n");
 
-  const payload = buildRiskAlertEmbed({
-    title: "Portfolio health (daily)",
-    message,
-    source: "copy:portfolio-health",
+  const payload = buildPortfolioEmbed({
+    title: `Portfolio health — ${dayKey}`,
+    description: "Daily live copy portfolio snapshot.",
+    fields: message.split("\n").map((line) => {
+      const idx = line.indexOf(":");
+      if (idx <= 0) return { name: "Note", value: line };
+      return { name: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim(), inline: true };
+    }),
+    dashboardUrl: `${config.dashboardBaseUrl}/copy`,
   });
 
   if (config.canSend) {

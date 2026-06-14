@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@augurium/database": "*",
+    "@augurium/shared": "*",
     "@augurium/shadow": "*",
     "@polymarket/clob-client-v2": "^1.0.6",
     "polymarket-us": "^0.1.1",

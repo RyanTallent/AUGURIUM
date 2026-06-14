@@ -14,3 +14,5 @@ export * from "./copy-mirror-analytics.js";
 export * from "./copy-live-sizing.js";
 export * from "./copy-live-ladder.js";
 export * from "./rising-wallets.js";
+export * from "./scoring-v1.js";
+export * from "./copy-v1-gates.js";

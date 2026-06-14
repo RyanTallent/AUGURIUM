@@ -51,7 +51,20 @@ export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
       OR: [
         { dedupeKey: { startsWith: LIVE_COPY_DISCORD_PREFIX } },
         { dedupeKey: { startsWith: "portfolio:health:" } },
-        { eventType: { in: ["PORTFOLIO_HEALTH", "RISK_ALERT", "COPY_WEEKLY_STOP"] } },
+        { dedupeKey: { startsWith: "brain:" } },
+        { dedupeKey: { startsWith: "journal:" } },
+        { dedupeKey: { startsWith: "copy:weekly-stop:" } },
+        {
+          eventType: {
+            in: [
+              "PORTFOLIO_HEALTH",
+              "RISK_ALERT",
+              "COPY_WEEKLY_STOP",
+              "BRAIN_UPDATE",
+              "JOURNAL_ENTRY",
+            ],
+          },
+        },
       ],
       AND: [
         {

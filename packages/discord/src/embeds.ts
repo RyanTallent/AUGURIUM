@@ -222,6 +222,16 @@ export function buildLiveCopyTradeEmbed(input: {
   blockReason?: string | null;
   ladderRung?: 1 | 2;
   dashboardUrl: string;
+  tier?: string | null;
+  conviction?: number | null;
+  lifetime?: number | null;
+  heat?: number | null;
+  confidence?: number | null;
+  uncertainty?: number | null;
+  usMatchPct?: number | null;
+  usMarketSlug?: string | null;
+  realizedPnlUsd?: number | null;
+  reason?: string | null;
 }): DiscordEventPayload {
   const titleByKind = {
     filled: "TRADE ENTER",
@@ -241,25 +251,86 @@ export function buildLiveCopyTradeEmbed(input: {
     title: titleByKind[input.kind],
     description:
       input.kind === "filled"
-        ? `Position opened on Polymarket US (verified fill) · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
+        ? `Verified fill on Polymarket US · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
         : input.kind === "partial"
-          ? `Ladder rung ${input.ladderRung ?? "?"} partial sell · **${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`
-          : `**${input.marketTitle}** · **${input.side.toUpperCase()}** · $${input.sizeUsd.toFixed(2)}`,
+          ? `Ladder rung ${input.ladderRung ?? "?"} · **${input.marketTitle}** · $${input.sizeUsd.toFixed(2)} sold`
+          : input.kind === "closed"
+            ? `Position closed · **${input.marketTitle}** · **${input.side.toUpperCase()}**`
+            : `**${input.marketTitle}** · **${input.side.toUpperCase()}**`,
     color: colorByKind[input.kind],
     url: input.dashboardUrl,
     fields: [
       { name: "Leader", value: trader, inline: true },
+      ...(input.tier ? [{ name: "Tier", value: input.tier, inline: true }] : []),
       { name: "Entry", value: input.entryPrice.toFixed(3), inline: true },
       { name: "Size", value: `$${input.sizeUsd.toFixed(2)}`, inline: true },
+      ...(input.conviction != null
+        ? [{ name: "Conviction", value: input.conviction.toFixed(0), inline: true }]
+        : []),
+      ...(input.lifetime != null
+        ? [{ name: "Lifetime", value: input.lifetime.toFixed(0), inline: true }]
+        : []),
+      ...(input.heat != null ? [{ name: "Heat", value: input.heat.toFixed(0), inline: true }] : []),
+      ...(input.confidence != null
+        ? [{ name: "Confidence", value: input.confidence.toFixed(0), inline: true }]
+        : []),
+      ...(input.uncertainty != null
+        ? [{ name: "Uncertainty", value: input.uncertainty.toFixed(0), inline: true }]
+        : []),
+      ...(input.usMatchPct != null
+        ? [{ name: "US match", value: `${input.usMatchPct.toFixed(0)}%`, inline: true }]
+        : []),
+      ...(input.usMarketSlug
+        ? [{ name: "US slug", value: input.usMarketSlug.slice(0, 120) }]
+        : []),
+      ...(input.realizedPnlUsd != null
+        ? [{ name: "PnL", value: `$${input.realizedPnlUsd.toFixed(2)}`, inline: true }]
+        : []),
       ...(input.providerOrderId
         ? [{ name: "Order ID", value: input.providerOrderId.slice(0, 120) }]
         : []),
       ...(input.kind === "partial" && input.ladderRung
         ? [{ name: "Ladder rung", value: String(input.ladderRung), inline: true }]
         : []),
-      ...(input.blockReason
-        ? [{ name: "Reason", value: input.blockReason.slice(0, 900) }]
+      ...(input.reason
+        ? [{ name: "Reason", value: input.reason.slice(0, 900) }]
         : []),
+      ...(input.blockReason
+        ? [{ name: "Problem", value: input.blockReason.slice(0, 900) }]
+        : []),
+      { name: "Dashboard", value: input.dashboardUrl },
+    ],
+  });
+}
+
+export function buildBrainUpdateEmbed(input: {
+  title: string;
+  message: string;
+  fields: { name: string; value: string; inline?: boolean }[];
+  dashboardUrl: string;
+}): DiscordEventPayload {
+  return liveCopyPayload({
+    title: input.title,
+    description: input.message.slice(0, 1500),
+    color: 0x6366f1,
+    url: input.dashboardUrl,
+    fields: [...input.fields, { name: "Dashboard", value: input.dashboardUrl }],
+  });
+}
+
+export function buildJournalEntryEmbed(input: {
+  title: string;
+  decision: string;
+  context: string;
+  dashboardUrl: string;
+}): DiscordEventPayload {
+  return liveCopyPayload({
+    title: input.title,
+    description: input.decision.slice(0, 1500),
+    color: 0x64748b,
+    url: input.dashboardUrl,
+    fields: [
+      { name: "Context", value: input.context.slice(0, 900) },
       { name: "Dashboard", value: input.dashboardUrl },
     ],
   });

@@ -14,6 +14,9 @@ import {
   getCopyLiveLadderConfig,
   ladderStateAfterRung,
   viewLadderState,
+  buildTraderTruth,
+  evaluateCopyV1EntryGate,
+  isRoutineCopySkipReason,
   type CopyLiveLadderAction,
 } from "@augurium/copy-trading";
 import {
@@ -27,10 +30,10 @@ import {
   verifyUsOrderFill,
 } from "@augurium/execution";
 import type { ExecutionProvider } from "@augurium/execution";
-import { notifyLiveCopyTrade } from "../lib/enqueue-live-copy-discord.js";
+import { notifyLiveCopyTrade, notifyWeeklyStopRisk, notifyJournalDecision } from "../lib/enqueue-live-copy-discord.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 import { loadTopCopyLeaderIds } from "../lib/refresh-copy-trader-controls.js";
-import { isLikelyGlobalOnlyMarketTitle, isLikelyUsOverlapMarketTitle, usLeaderCompatRequired } from "../lib/us-leader-compat.js";
+import { usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 type LiveMirrorRow = {
   id: string;
@@ -484,21 +487,37 @@ export interface CopyLiveJobSummary {
   message: string;
 }
 
-async function loadCopyTargetPositions(): Promise<
-  Array<{
-    traderId: string;
-    sourcePositionKey: string;
-    marketId: string;
-    side: string;
-    entryPrice: number;
-    asset: string | null;
-    pnl: number;
-    size: number;
-    avgPrice: number;
-  }>
-> {
+type CopyLiveSource = {
+  traderId: string;
+  sourcePositionKey: string;
+  marketId: string;
+  side: string;
+  entryPrice: number;
+  asset: string | null;
+  pnl: number;
+  size: number;
+  avgPrice: number;
+  conviction?: number;
+  tier?: string;
+  lifetime?: number;
+  heat?: number;
+  confidence?: number;
+  uncertainty?: number;
+  usMatchPct?: number;
+  usMarketSlug?: string | null;
+};
+
+async function loadCopyTargetPositions(): Promise<CopyLiveSource[]> {
   const topIds = await loadTopCopyLeaderIds();
   if (topIds.length === 0) return [];
+
+  const traders = await prisma.trader.findMany({
+    where: { id: { in: topIds } },
+    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+  });
+  const truthById = new Map(
+    traders.map((t) => [t.id, buildTraderTruth(t, t.metricsSnapshots[0] ?? null)]),
+  );
 
   const rows = await prisma.position.findMany({
     where: { status: "open", traderId: { in: topIds } },
@@ -515,34 +534,34 @@ async function loadCopyTargetPositions(): Promise<
     },
   });
 
-  const mapped: Array<{
-    traderId: string;
-    sourcePositionKey: string;
-    marketId: string;
-    side: string;
-    entryPrice: number;
-    asset: string | null;
-    pnl: number;
-    size: number;
-    avgPrice: number;
-  }> = [];
+  const mapped: CopyLiveSource[] = [];
 
   for (const r of rows) {
-    if (usLeaderCompatRequired() && isLikelyGlobalOnlyMarketTitle(r.market.title)) {
+    const truth = truthById.get(r.traderId);
+    if (!truth) continue;
+
+    const gate = await evaluateUsCompatibilityGate({
+      globalMarketId: r.marketId,
+      globalTitle: r.market.title,
+      globalSlug: r.market.slug,
+      side: r.side,
+      category: r.market.category,
+    });
+
+    const v1 = evaluateCopyV1EntryGate({
+      truth,
+      usMatchConfidence: gate.confidence,
+      leaderPnl: r.pnl,
+      leaderSize: r.size,
+      leaderAvgPrice: r.avgPrice,
+    });
+
+    if (!v1.pass || !gate.allowed || !gate.usMarketSlug) {
       continue;
     }
-    if (usLeaderCompatRequired() && !isLikelyUsOverlapMarketTitle(r.market.title)) {
+
+    if (usLeaderCompatRequired() && gate.confidence < 0.9) {
       continue;
-    }
-    if (usLeaderCompatRequired()) {
-      const gate = await evaluateUsCompatibilityGate({
-        globalMarketId: r.marketId,
-        globalTitle: r.market.title,
-        globalSlug: r.market.slug,
-        side: r.side,
-        category: r.market.category,
-      });
-      if (!gate.allowed || !gate.usMarketSlug) continue;
     }
 
     mapped.push({
@@ -555,6 +574,14 @@ async function loadCopyTargetPositions(): Promise<
       pnl: r.pnl,
       size: r.size,
       avgPrice: r.avgPrice,
+      conviction: v1.scores.conviction,
+      tier: truth.tier,
+      lifetime: v1.scores.lifetime,
+      heat: v1.scores.heat,
+      confidence: v1.scores.confidence,
+      uncertainty: v1.scores.uncertainty,
+      usMatchPct: v1.scores.usMatchPct,
+      usMarketSlug: gate.usMarketSlug,
     });
   }
 
@@ -612,7 +639,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   let mirrorsSubmitted = 0;
   let mirrorsClosed = 0;
 
-  const sources = USE_PAPER_SOURCE
+  const sources: CopyLiveSource[] = USE_PAPER_SOURCE
     ? (
         await prisma.copyPaperPosition.findMany({
           where: { status: "OPEN" },
@@ -655,7 +682,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         side: mirror.side,
         category: mirror.market.category,
       });
-      if (gate.allowed && gate.usMarketSlug) {
+      if (gate.allowed && gate.usMarketSlug && gate.confidence >= 0.9) {
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
           data: {
@@ -666,9 +693,8 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
             matchReason: gate.reason,
           },
         });
-        console.log(
-          `[worker] live copy unblocked mirror=${mirror.id} slug=${gate.usMarketSlug} conf=${gate.confidence.toFixed(2)}`,
-        );
+      } else {
+        await prisma.copyLiveMirror.delete({ where: { id: mirror.id } }).catch(() => undefined);
       }
     }
   }
@@ -747,7 +773,17 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   }
 
   const bankroll = await resolveLiveCopyBankroll(provider ?? undefined);
+  const weeklyBefore = await prisma.copyWeeklyRiskState.findUnique({
+    where: { id: "current" },
+    select: { halted: true, weekKey: true },
+  });
   const weekly = await evaluateCopyWeeklyStopLoss(bankroll.bankrollUsd);
+  if (weekly.halted && weekly.haltedReason && (!weeklyBefore?.halted || weeklyBefore.weekKey !== weekly.weekKey)) {
+    await notifyWeeklyStopRisk({
+      weekKey: weekly.weekKey,
+      message: weekly.haltedReason,
+    });
+  }
   const blockReason = weekly.halted
     ? weekly.haltedReason
     : readiness.blockers.length > 0
@@ -775,15 +811,18 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     sumOpenExposureUsd(exposureBase),
     sizing,
     bankroll.availableUsd,
+    75,
   );
 
   for (const src of sources) {
     const deployedNow = sumOpenExposureUsd(exposureBase);
+    const conviction = src.conviction ?? 75;
     const sizeUsd = computeLiveTradeSizeUsd(
       bankroll.bankrollUsd,
       deployedNow,
       sizing,
       bankroll.availableUsd,
+      conviction,
     );
 
     const existing = await prisma.copyLiveMirror.findUnique({
@@ -817,6 +856,15 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       if (!cap.allowed) localBlock = cap.reason;
     }
 
+    if (localBlock && isRoutineCopySkipReason(localBlock)) {
+      if (existing && existing.status !== "OPEN" && existing.status !== "SUBMITTED") {
+        await prisma.copyLiveMirror.delete({ where: { id: existing.id } }).catch(() => undefined);
+      }
+      continue;
+    }
+
+    const usSlug = src.usMarketSlug ?? null;
+
     if (!existing) {
       await prisma.copyLiveMirror.create({
         data: {
@@ -828,6 +876,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           entryPrice: src.entryPrice,
           status: localBlock ? "BLOCKED" : "PENDING",
           blockReason: localBlock,
+          usMarketSlug: usSlug,
         },
       });
       if (localBlock) mirrorsBlocked++;
@@ -908,17 +957,11 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         deployedNow - mirror.requestedSizeUsd,
         sizing,
         freshBankroll.availableUsd,
+        75,
       );
 
       if (orderSizeUsd <= 0) {
-        await prisma.copyLiveMirror.update({
-          where: { id: mirror.id },
-          data: {
-            status: "BLOCKED",
-            blockReason: "no deploy room or insufficient buying power",
-          },
-        });
-        mirrorsBlocked++;
+        await prisma.copyLiveMirror.delete({ where: { id: mirror.id } }).catch(() => undefined);
         continue;
       }
 
@@ -930,6 +973,9 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       }
 
       let tokenId: string | null = null;
+      let usSlugForNotify: string | null = mirror.usMarketSlug;
+      let usMatchPctNotify: number | null =
+        mirror.matchConfidence != null ? mirror.matchConfidence * 100 : null;
 
       if (cfg.provider === "polymarket-us") {
         const gate = await evaluateUsCompatibilityGate({
@@ -942,9 +988,10 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
 
         if (!gate.allowed || !gate.usMarketSlug) {
           const blockReason = gate.reason;
-          console.warn(
-            `[worker] live copy gate blocked mirror=${mirror.id} conf=${gate.confidence.toFixed(2)} reason=${blockReason}`,
-          );
+          if (isRoutineCopySkipReason(blockReason)) {
+            await prisma.copyLiveMirror.delete({ where: { id: mirror.id } }).catch(() => undefined);
+            continue;
+          }
           await prisma.copyLiveMirror.update({
             where: { id: mirror.id },
             data: {
@@ -970,6 +1017,8 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         }
 
         tokenId = gate.usMarketSlug;
+        usSlugForNotify = gate.usMarketSlug;
+        usMatchPctNotify = gate.confidence * 100;
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
           data: {
@@ -1045,6 +1094,15 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           entryPrice,
           traderAddress: mirror.trader.address,
           providerOrderId: result.providerOrderId ?? null,
+          usMarketSlug: usSlugForNotify,
+          usMatchPct: usMatchPctNotify,
+          reason: "verified EXECUTED fill",
+        });
+        await notifyJournalDecision({
+          key: `enter:${mirror.id}`,
+          title: "Trade entry",
+          decision: `Opened $${filledUsd.toFixed(2)} on ${mirror.market.title.slice(0, 80)}`,
+          context: `Leader ${mirror.trader.address.slice(0, 10)}… · US slug ${usSlugForNotify ?? tokenId ?? "?"}`,
         });
       } else {
         await prisma.copyLiveMirror.update({
@@ -1096,6 +1154,42 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[worker] live copy US position sync failed: ${message}`);
+    }
+  }
+
+  const [mirrorStatusCounts, discordPending] = await Promise.all([
+    prisma.copyLiveMirror.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.discordEvent.count({
+      where: {
+        status: "PENDING",
+        dedupeKey: { startsWith: "copy:live:" },
+      },
+    }),
+  ]);
+  const statusSummary = mirrorStatusCounts
+    .map((r) => `${r.status}=${r._count._all}`)
+    .join(" ");
+  console.log(
+    `[worker] live copy summary mirrors=[${statusSummary}] discordPending=${discordPending} openedThisRun=${mirrorsSubmitted}`,
+  );
+
+  if (mirrorsSubmitted === 0 && (mirrorsBlocked > 0 || sources.length > 0)) {
+    const blockedRows = await prisma.copyLiveMirror.findMany({
+      where: { status: "BLOCKED" },
+      select: { blockReason: true },
+      take: 200,
+    });
+    const reasonCounts = new Map<string, number>();
+    for (const row of blockedRows) {
+      const reason = row.blockReason?.trim() || "unknown";
+      reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    }
+    const topReasons = [...reasonCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([reason, count]) => `${count}x ${reason.slice(0, 72)}`);
+    if (topReasons.length > 0) {
+      console.log(`[worker] live copy top block reasons: ${topReasons.join(" | ")}`);
     }
   }
 

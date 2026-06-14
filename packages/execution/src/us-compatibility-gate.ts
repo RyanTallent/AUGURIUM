@@ -19,22 +19,18 @@ export interface UsCompatibilityResult {
   usMarketSlug: string | null;
 }
 
-/** US compatibility gate — skip copy when match confidence is below threshold. */
+/** US compatibility gate — catalog-only, strict confidence threshold (no bypasses). */
 export async function evaluateUsCompatibilityGate(
   input: UsCompatibilityInput,
 ): Promise<UsCompatibilityResult> {
   const minConfidence = getUsMatchMinConfidence();
   const leader: UsMarketLookup = {
-    slug: input.globalSlug,
     title: input.globalTitle,
     category: input.category,
   };
 
   const match = await resolveUsMarketForExecution(leader);
-  const trusted =
-    match.reason.includes("direct US slug") || match.reason.includes("exact title match");
-  const allowed =
-    Boolean(match.slug) && (match.confidence >= minConfidence || trusted);
+  const allowed = Boolean(match.slug) && match.confidence >= minConfidence;
 
   return {
     allowed,

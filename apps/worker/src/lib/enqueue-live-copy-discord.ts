@@ -1,5 +1,12 @@
 import { prisma } from "@augurium/database";
-import { buildLiveCopyTradeEmbed, buildRiskAlertEmbed, getDiscordConfig } from "@augurium/discord";
+import {
+  buildLiveCopyTradeEmbed,
+  buildRiskAlertEmbed,
+  buildBrainUpdateEmbed,
+  buildJournalEntryEmbed,
+  getDiscordConfig,
+} from "@augurium/discord";
+import { isRoutineCopySkipReason } from "@augurium/copy-trading";
 import { queueDiscordEvent } from "./discord-events.js";
 import {
   dispatchLiveCopyDiscordEvents,
@@ -8,17 +15,7 @@ import {
 
 /** Routine scan blocks — dashboard only, not Discord. */
 export function isSilentLiveCopyBlockReason(reason: string | null | undefined): boolean {
-  if (!reason) return false;
-  const r = reason.toLowerCase();
-  return (
-    r.includes("late copy") ||
-    r.includes("exposure would exceed") ||
-    r.includes("no deploy room") ||
-    r.includes("insufficient buying power") ||
-    r.includes("uncertain match") ||
-    r.includes("no us-compatible") ||
-    r.includes("global-only")
-  );
+  return isRoutineCopySkipReason(reason);
 }
 
 export async function notifyLiveCopyTrade(input: {
@@ -32,10 +29,19 @@ export async function notifyLiveCopyTrade(input: {
   providerOrderId?: string | null;
   blockReason?: string | null;
   ladderRung?: 1 | 2;
+  tier?: string | null;
+  conviction?: number | null;
+  lifetime?: number | null;
+  heat?: number | null;
+  confidence?: number | null;
+  uncertainty?: number | null;
+  usMatchPct?: number | null;
+  usMarketSlug?: string | null;
+  realizedPnlUsd?: number | null;
+  reason?: string | null;
 }): Promise<"queued" | "skipped" | "already_sent"> {
   const config = getDiscordConfig(process.env);
   if (!config.canSend) {
-    console.warn("[discord] live copy notification skipped — Discord not configured");
     return "skipped";
   }
 
@@ -116,6 +122,101 @@ export async function notifyLiveCopyProblem(input: {
   }
 }
 
+export async function notifyWeeklyStopRisk(input: {
+  weekKey: string;
+  message: string;
+}): Promise<void> {
+  const config = getDiscordConfig(process.env);
+  if (!config.canSend) return;
+
+  const dedupeKey = `copy:weekly-stop:${input.weekKey}`;
+  const existing = await prisma.discordEvent.findUnique({
+    where: { dedupeKey },
+    select: { status: true },
+  });
+  if (existing && existing.status === "SENT") return;
+
+  const status = await queueDiscordEvent({
+    eventType: "COPY_WEEKLY_STOP",
+    dedupeKey,
+    title: `RISK: Weekly stop — ${input.weekKey}`,
+    payload: buildRiskAlertEmbed({
+      title: "Weekly 20% stop — no new entries",
+      message: input.message,
+      source: "copy:live",
+    }),
+  });
+
+  if (status === "PENDING") {
+    await dispatchLiveCopyDiscordEvents();
+  }
+}
+
+export async function notifyBrainLeaderChange(input: {
+  promoted: string[];
+  cooled: string[];
+  copyEnabled: number;
+}): Promise<void> {
+  const config = getDiscordConfig(process.env);
+  if (!config.canSend) return;
+  if (input.promoted.length === 0 && input.cooled.length === 0) return;
+
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const dedupeKey = `brain:leaders:${dayKey}:${input.promoted.length}:${input.cooled.length}`;
+  const fmt = (w: string) => `\`${w.slice(0, 6)}…${w.slice(-4)}\``;
+
+  const status = await queueDiscordEvent({
+    eventType: "BRAIN_UPDATE",
+    dedupeKey,
+    title: "AUGURIUM brain — leader allocation",
+    payload: buildBrainUpdateEmbed({
+      title: "Leader promotions / cooling",
+      message: `${input.copyEnabled} active COPY leaders after v1 gates.`,
+      fields: [
+        {
+          name: "Promoted",
+          value: input.promoted.length ? input.promoted.slice(0, 8).map(fmt).join(", ") : "—",
+        },
+        {
+          name: "Cooled",
+          value: input.cooled.length ? input.cooled.slice(0, 8).map(fmt).join(", ") : "—",
+        },
+      ],
+      dashboardUrl: `${config.dashboardBaseUrl}/copy`,
+    }),
+  });
+
+  if (status === "PENDING") {
+    await dispatchLiveCopyDiscordEvents();
+  }
+}
+
+export async function notifyJournalDecision(input: {
+  key: string;
+  title: string;
+  decision: string;
+  context: string;
+}): Promise<void> {
+  const config = getDiscordConfig(process.env);
+  if (!config.canSend) return;
+
+  const status = await queueDiscordEvent({
+    eventType: "JOURNAL_ENTRY",
+    dedupeKey: `journal:${input.key}`,
+    title: input.title.slice(0, 120),
+    payload: buildJournalEntryEmbed({
+      title: input.title,
+      decision: input.decision,
+      context: input.context,
+      dashboardUrl: `${config.dashboardBaseUrl}/copy`,
+    }),
+  });
+
+  if (status === "PENDING") {
+    await dispatchLiveCopyDiscordEvents();
+  }
+}
+
 /** Startup: configure Discord and clear non-trade backlog — no ENTER re-alerts on redeploy. */
 export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
   const config = getDiscordConfig(process.env);
@@ -124,7 +225,7 @@ export async function ensureLiveCopyDiscordOnStartup(): Promise<void> {
   );
   if (!config.canSend) {
     console.warn(
-      "[discord] no alerts until DISCORD_ENABLED=true and DISCORD_WEBHOOK_URL are set in augurium-shared",
+      "[discord] no alerts until DISCORD_ENABLED=true and channel webhooks are set",
     );
     return;
   }

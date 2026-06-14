@@ -4,8 +4,9 @@ import { capAllocationPct, evaluateTraderDrawdownDisable } from "./copy-risk.js"
 import { buildTraderTruth } from "./trader-truth.js";
 
 describe("copy risk", () => {
-  it("caps allocation at 5%", () => {
-    assert.equal(capAllocationPct(0.12), 0.05);
+  it("caps allocation at per-trader limit (default 50%)", () => {
+    assert.equal(capAllocationPct(0.6), 0.5);
+    assert.equal(capAllocationPct(0.12), 0.12);
   });
 
   it("disables trader above drawdown cap", () => {
