@@ -1,4 +1,5 @@
 import {
+  matchUsMarketFromCatalog,
   resolveUsMarketForExecution,
   getUsMatchMinConfidence,
   type UsMarketLookup,
@@ -19,7 +20,26 @@ export interface UsCompatibilityResult {
   usMarketSlug: string | null;
 }
 
-/** US compatibility gate — catalog-only, strict confidence threshold (no bypasses). */
+/** Catalog-only match for leader refresh (no live US API verify). */
+export async function evaluateUsCatalogMatch(
+  input: UsCompatibilityInput,
+): Promise<UsCompatibilityResult> {
+  const minConfidence = getUsMatchMinConfidence();
+  const leader: UsMarketLookup = {
+    title: input.globalTitle,
+    category: input.category,
+  };
+  const match = await matchUsMarketFromCatalog(leader);
+  const allowed = Boolean(match.slug) && match.confidence >= minConfidence;
+  return {
+    allowed,
+    confidence: match.confidence,
+    reason: match.reason,
+    usMarketSlug: match.slug,
+  };
+}
+
+/** US compatibility gate — catalog match + live US API verify at order time. */
 export async function evaluateUsCompatibilityGate(
   input: UsCompatibilityInput,
 ): Promise<UsCompatibilityResult> {

@@ -187,9 +187,24 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     include: { trader: true },
   });
 
-  let synced = 0;
+  const scanLeaders = await prisma.trader.findMany({
+    where: { discoveredVia: "polymarket-scan", lastScoredAt: { not: null } },
+    orderBy: { rankingScore: "desc" },
+    take: COPY_BATCH,
+    select: { id: true, address: true },
+  });
+
+  const traderById = new Map<string, { id: string; address: string }>();
   for (const c of controls) {
-    synced += await syncPositionsFromPolymarketScanForTrader(c.trader);
+    traderById.set(c.trader.id, c.trader);
+  }
+  for (const t of scanLeaders) {
+    traderById.set(t.id, t);
+  }
+
+  let synced = 0;
+  for (const trader of traderById.values()) {
+    synced += await syncPositionsFromPolymarketScanForTrader(trader);
   }
 
   const watchlist = await prisma.usLeaderWatchlist.findMany({
@@ -204,9 +219,9 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     });
   }
 
-  if (controls.length > 0 || watchlist.length > 0) {
+  if (traderById.size > 0 || watchlist.length > 0) {
     console.log(
-      `[position-sync:scan] ${synced} positions for ${controls.length} COPY + ${watchlist.length} watchlist trader(s)`,
+      `[position-sync:scan] ${synced} positions for ${traderById.size} scan leader(s) + ${watchlist.length} watchlist`,
     );
   }
   return synced;

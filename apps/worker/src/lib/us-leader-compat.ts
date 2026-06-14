@@ -1,5 +1,5 @@
 import { prisma } from "@augurium/database";
-import { evaluateUsCompatibilityGate } from "@augurium/execution";
+import { evaluateUsCatalogMatch, evaluateUsCompatibilityGate } from "@augurium/execution";
 import { isUsOnlyLiveCopyMode } from "@augurium/shared";
 import { polymarketScanFetch, type ScanWalletTrade } from "./polymarket-scan.js";
 
@@ -120,10 +120,21 @@ export async function scoreTraderUsLiveCompatFast(
 export async function scoreTraderUsLiveCompat(
   traderId: string,
   address: string,
+  opts?: { catalogOnly?: boolean; allowScanFetch?: boolean },
 ): Promise<UsLeaderCompatScore> {
-  const candidates = await loadOpenPositionCandidates(traderId, address, false);
+  const candidates = await loadOpenPositionCandidates(
+    traderId,
+    address,
+    opts?.allowScanFetch === true,
+  );
   if (candidates.length === 0) {
-    return scoreTraderUsLiveCompatFast(traderId, address);
+    return {
+      openPositions: 0,
+      likelyGlobalOnly: 0,
+      usCompatible: 0,
+      bestConfidence: 0,
+      hasTradeableUsPosition: false,
+    };
   }
 
   let usCompatible = 0;
@@ -131,13 +142,21 @@ export async function scoreTraderUsLiveCompat(
 
   const toCheck = candidates.slice(0, MAX_FULL_GATE_POSITIONS);
   for (const pos of toCheck) {
-    const gate = await evaluateUsCompatibilityGate({
-      globalMarketId: pos.marketId,
-      globalTitle: pos.title,
-      globalSlug: pos.slug,
-      side: "yes",
-      category: pos.category,
-    });
+    const gate = opts?.catalogOnly
+      ? await evaluateUsCatalogMatch({
+          globalMarketId: pos.marketId,
+          globalTitle: pos.title,
+          globalSlug: pos.slug,
+          side: "yes",
+          category: pos.category,
+        })
+      : await evaluateUsCompatibilityGate({
+          globalMarketId: pos.marketId,
+          globalTitle: pos.title,
+          globalSlug: pos.slug,
+          side: "yes",
+          category: pos.category,
+        });
     bestConfidence = Math.max(bestConfidence, gate.confidence);
     if (gate.allowed && gate.usMarketSlug) usCompatible++;
   }

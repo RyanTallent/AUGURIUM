@@ -31,9 +31,15 @@ export function copyMinLeaders(): number {
 }
 
 function usGateRefreshLimit(): number {
-  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? "40";
+  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? "12";
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 40;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 12;
+}
+
+function refreshEvaluateBatch(): number {
+  const raw = process.env.COPY_CONTROLS_REFRESH_BATCH ?? "50";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
 }
 
 /** Keep CopyTraderControl in sync with v1 scoring gates. */
@@ -41,8 +47,10 @@ export async function refreshCopyTraderControls(): Promise<{
   evaluated: number;
   copyEnabled: number;
 }> {
-  const pool = copyCandidatePoolSize();
+  const pool = Math.min(refreshEvaluateBatch(), copyCandidatePoolSize());
   const gateLimit = usGateRefreshLimit();
+  console.log(`[worker] copy trader controls start pool=${pool} usGate=${gateLimit}`);
+
   const traders = await prisma.trader.findMany({
     where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
     orderBy: { rankingScore: "desc" },
@@ -50,9 +58,13 @@ export async function refreshCopyTraderControls(): Promise<{
     include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
   });
 
-  const gateTraderIds = new Set(
-    [...traders].sort((a, b) => b.rankingScore - a.rankingScore).slice(0, gateLimit).map((t) => t.id),
-  );
+  const priorControls = await prisma.copyTraderControl.findMany({
+    where: { traderId: { in: traders.map((t) => t.id) } },
+    select: { traderId: true, enabled: true },
+  });
+  const priorEnabled = new Map(priorControls.map((p) => [p.traderId, p.enabled]));
+
+  const gateTraderIds = new Set(traders.slice(0, gateLimit).map((t) => t.id));
 
   let copyEnabled = 0;
   const promoted: string[] = [];
@@ -70,7 +82,10 @@ export async function refreshCopyTraderControls(): Promise<{
       (usLeaderCompatRequired() || usePolymarketScanIntel()) &&
       gateTraderIds.has(t.id)
     ) {
-      const compat = await scoreTraderUsLiveCompat(t.id, t.address);
+      const compat = await scoreTraderUsLiveCompat(t.id, t.address, {
+        catalogOnly: true,
+        allowScanFetch: false,
+      });
       usMatch = compat.bestConfidence;
     }
 
@@ -82,12 +97,9 @@ export async function refreshCopyTraderControls(): Promise<{
       failReasons.set(key, (failReasons.get(key) ?? 0) + 1);
     }
 
-    const prior = await prisma.copyTraderControl.findUnique({
-      where: { traderId: t.id },
-      select: { enabled: true },
-    });
-    if (prior && !prior.enabled && enabled) promoted.push(t.address);
-    if (prior?.enabled && !enabled) cooled.push(t.address);
+    const prior = priorEnabled.get(t.id);
+    if (prior === false && enabled) promoted.push(t.address);
+    if (prior === true && !enabled) cooled.push(t.address);
 
     const strengths = [
       ...legacy.strengths,
@@ -122,7 +134,7 @@ export async function refreshCopyTraderControls(): Promise<{
       },
     });
 
-    if (i > 0 && i % 25 === 0) {
+    if (i > 0 && i % 5 === 0) {
       console.log(`[worker] copy trader controls progress ${i}/${traders.length}`);
     }
   }

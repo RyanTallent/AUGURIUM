@@ -156,6 +156,10 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       console.log("[worker] copy:auto-pipeline US mode — trader scores from PolymarketScan ingest");
     }
 
+    if (usMode && !broadIntel) {
+      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
+    }
+
     const controls = await pipelineStep("copy_trader_controls", refreshCopyTraderControls);
     console.log(
       `[worker] copy:auto-pipeline copyTraderControl evaluated=${controls.evaluated} enabled=${controls.copyEnabled}`,
@@ -170,14 +174,14 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       return hits.length;
     });
 
-    if (usMode && !broadIntel) {
-      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
-    } else if (usMode && broadIntel) {
+    if (usMode && broadIntel) {
       positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
       positionsSynced += await pipelineStep(
         "position_sync_copy",
         syncPositionsForCopyTargetsFirst,
       );
+    } else if (usMode && !broadIntel) {
+      // position_sync_scan already ran before copy_trader_controls
     } else if (lite) {
       positionsSynced = await pipelineStep(
         "position_sync_copy",
