@@ -4,6 +4,7 @@ import {
   storeRawPayload,
   upsertTraderFromWallet,
 } from "../lib/ingestion-store.js";
+import { resolveOrCreateMarket } from "../lib/market-linking.js";
 import {
   polymarketScanFetch,
   type ScanWalletTrade,
@@ -12,45 +13,45 @@ import {
 const TRADE_LIMIT = Number(process.env.POLYMARKET_SCAN_TRADES_LIMIT ?? "200");
 const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "15");
 
-async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<string> {
+async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<string | null> {
+  const title =
+    trade.market_question?.trim() ||
+    `Scan market ${trade.market.slice(0, Math.min(12, trade.market.length))}`;
+
+  if (trade.market.startsWith("0x")) {
+    const resolved = await resolveOrCreateMarket({
+      conditionId: trade.market,
+      slug: trade.event_slug ?? null,
+      eventSlug: trade.event_slug ?? null,
+      title,
+    });
+    if (resolved) return resolved.marketId;
+  }
+
   const externalId = trade.market.startsWith("0x") ? trade.market : `scan:${trade.market}`;
   const conditionId = trade.market.startsWith("0x") ? trade.market : null;
 
-  const existing = await prisma.market.findFirst({
-    where: {
-      OR: [
-        { externalId },
-        ...(conditionId ? [{ conditionId }] : []),
-      ],
-    },
-    select: { id: true, slug: true },
-  });
-  if (existing) {
-    const eventSlug = trade.event_slug?.trim() || null;
-    if (eventSlug && !existing.slug) {
-      await prisma.market.update({
-        where: { id: existing.id },
-        data: { slug: eventSlug, eventSlug },
-      });
-    }
-    return existing.id;
-  }
-
   try {
-    const row = await prisma.market.create({
-      data: {
+    const row = await prisma.market.upsert({
+      where: { externalId },
+      create: {
         externalId,
         conditionId,
-        source: "polymarket",
-        title: trade.market_question,
+        source: "polymarket-scan",
+        title,
         slug: trade.event_slug ?? null,
         eventSlug: trade.event_slug ?? null,
         active: true,
       },
+      update: {
+        title,
+        slug: trade.event_slug ?? undefined,
+        eventSlug: trade.event_slug ?? undefined,
+      },
     });
     return row.id;
-  } catch {
-    const fallback = await prisma.market.findFirst({
+  } catch (err) {
+    const existing = await prisma.market.findFirst({
       where: {
         OR: [
           { externalId },
@@ -59,8 +60,12 @@ async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<s
       },
       select: { id: true },
     });
-    if (fallback) return fallback.id;
-    throw new Error(`failed to resolve market for scan trade ${trade.market}`);
+    if (existing) return existing.id;
+    console.warn(
+      `[position-sync:scan] market resolve failed market=${trade.market} title="${title.slice(0, 48)}"`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
   }
 }
 
@@ -135,7 +140,9 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
   let synced = 0;
 
   for (const pos of nets) {
-    const sample = res.data.find((t) => t.market === pos.conditionId);
+    const sample =
+      res.data.find((t) => t.market === pos.conditionId && t.outcome === pos.side) ??
+      res.data.find((t) => t.market === pos.conditionId);
     const marketId = await ensureGlobalMarketForScanTrade({
       market: pos.conditionId,
       market_question: sample?.market_question ?? pos.side,
@@ -147,6 +154,7 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
       trade_timestamp: new Date().toISOString(),
       transaction_hash: `scan:${trader.address}:${pos.conditionId}`,
     });
+    if (!marketId) continue;
 
     const key = positionExternalKey(trader.address, pos.conditionId, pos.side);
     await prisma.position.upsert({
@@ -204,7 +212,14 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
 
   let synced = 0;
   for (const trader of traderById.values()) {
-    synced += await syncPositionsFromPolymarketScanForTrader(trader);
+    try {
+      synced += await syncPositionsFromPolymarketScanForTrader(trader);
+    } catch (err) {
+      console.warn(
+        `[position-sync:scan] trader ${trader.address.slice(0, 10)}… failed`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   const watchlist = await prisma.usLeaderWatchlist.findMany({
@@ -212,11 +227,18 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     take: COPY_BATCH,
   });
   for (const w of watchlist) {
-    const traderId = await upsertTraderFromWallet(w.wallet, "polymarket-scan-watchlist");
-    synced += await syncPositionsFromPolymarketScanForTrader({
-      id: traderId,
-      address: w.wallet,
-    });
+    try {
+      const traderId = await upsertTraderFromWallet(w.wallet, "polymarket-scan-watchlist");
+      synced += await syncPositionsFromPolymarketScanForTrader({
+        id: traderId,
+        address: w.wallet,
+      });
+    } catch (err) {
+      console.warn(
+        `[position-sync:scan] watchlist ${w.wallet.slice(0, 10)}… failed`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   if (traderById.size > 0 || watchlist.length > 0) {
