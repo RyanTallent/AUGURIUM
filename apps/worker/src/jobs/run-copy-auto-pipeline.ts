@@ -1,6 +1,6 @@
 import { prisma } from "@augurium/database";
 import { detectRisingWallets } from "@augurium/copy-trading";
-import { isUsOnlyLiveCopyMode, usePolymarketScanIntel } from "@augurium/shared";
+import { isUsOnlyLiveCopyMode, isUsBroadIntelMode, usePolymarketScanIntel } from "@augurium/shared";
 import { ingestGlobalTrades } from "./ingest-trades.js";
 import { discoverWalletsFromHolders } from "./discover-wallets.js";
 import { ingestWalletActivityForCopyTargets } from "./ingest-wallet-activity.js";
@@ -91,13 +91,14 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
   const scanIntel = usePolymarketScanIntel();
   const usMode = scanIntel || isUsOnlyLiveCopyMode();
-  const lite = useLiteLivePath();
+  const broadIntel = usMode && isUsBroadIntelMode();
+  const lite = useLiteLivePath() && !broadIntel;
   const run = await prisma.ingestionRun.create({
     data: { source: "copy:auto-pipeline", status: "running" },
   });
 
   console.log(
-    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode}`,
+    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode} broadIntel=${broadIntel}`,
   );
 
   let tradesIngested = 0;
@@ -116,7 +117,19 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     if (usMode) {
       walletsDiscovered = await pipelineStep("polymarket_scan_leaders", ingestPolymarketScanLeaders);
       await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
-      console.log("[worker] copy:auto-pipeline US mode — skip global trade ingest and wallet discover");
+      if (broadIntel) {
+        if (INCLUDE_WALLET_DISCOVER) {
+          walletsDiscovered += await pipelineStep("wallet_discover", discoverWalletsFromHolders);
+        }
+        if (INCLUDE_WALLET_ACTIVITY) {
+          walletActivityIngested = await pipelineStep(
+            "wallet_activity",
+            ingestWalletActivityForCopyTargets,
+          );
+        }
+      } else {
+        console.log("[worker] copy:auto-pipeline US mode — skip global trade ingest and wallet discover");
+      }
     } else if (!lite) {
       tradesIngested = await pipelineStep("trade_ingest", ingestGlobalTrades);
       walletsDiscovered = await pipelineStep("wallet_discover", discoverWalletsFromHolders);
@@ -136,7 +149,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       );
     }
 
-    if (!usMode) {
+    if (!usMode || broadIntel) {
       const score = await pipelineStep("score_traders", runScoreTradersJob);
       tradersScored = score.scored;
     } else {
@@ -149,7 +162,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     );
 
     await pipelineStep("rising_wallets", async () => {
-      if (usMode) {
+      if (usMode && !broadIntel) {
         console.log("[worker] copy:auto-pipeline US mode — skip rising_wallets");
         return 0;
       }
@@ -157,8 +170,14 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       return hits.length;
     });
 
-    if (usMode) {
+    if (usMode && !broadIntel) {
       positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
+    } else if (usMode && broadIntel) {
+      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
+      positionsSynced += await pipelineStep(
+        "position_sync_copy",
+        syncPositionsForCopyTargetsFirst,
+      );
     } else if (lite) {
       positionsSynced = await pipelineStep(
         "position_sync_copy",

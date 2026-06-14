@@ -436,13 +436,35 @@ async function searchUsApiByTitle(
 }
 
 /**
- * Strict US compatibility gate for live execution.
- * Global slug is used only for leader title/category context — never for US slug translation.
+ * US compatibility gate for live execution.
+ * When US_COMPAT_TRY_GLOBAL_SLUG is enabled, tries leader global slug on Polymarket US first.
  */
 export async function resolveUsMarketForExecution(
   leader: UsMarketLookup,
 ): Promise<UsCompatibilityMatch> {
   const client = isPolymarketUsReady() ? getPolymarketUsClient() : getPolymarketUsPublicClient();
+  const tryGlobalSlug = process.env.US_COMPAT_TRY_GLOBAL_SLUG !== "false";
+  const relaxedSlug = process.env.US_COMPAT_RELAXED_SLUG === "true";
+
+  if (tryGlobalSlug && leader.slug?.trim()) {
+    const globalSlug = leader.slug.trim();
+    const slugHit =
+      (await trySlugCandidates(client, globalSlug, leader.title)) ??
+      (await tryEventSlugCandidates(client, globalSlug, leader.title));
+    if (slugHit) {
+      const verified = await verifyUsMarketActive(client, slugHit, leader.title);
+      if (verified.ok || relaxedSlug) {
+        return {
+          slug: slugHit,
+          confidence: Math.max(verified.confidence, relaxedSlug ? 0.85 : 0),
+          reason: relaxedSlug
+            ? `global slug on US (relaxed): ${slugHit}`
+            : `global slug on US: ${slugHit}`,
+          usTitle: verified.usTitle,
+        };
+      }
+    }
+  }
 
   const catalogMatch = await matchUsMarketFromCatalog(leader);
   if (catalogMatch.slug && catalogMatch.confidence >= US_MATCH_MIN_CONFIDENCE) {

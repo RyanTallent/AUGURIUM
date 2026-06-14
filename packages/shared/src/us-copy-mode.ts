@@ -25,3 +25,10 @@ export function requirePolymarketUsForLiveCopy(
   }
   return { ok: true };
 }
+
+/** Re-enable score-traders, full COPY controls, rising wallets while executing on Polymarket US. */
+export function isUsBroadIntelMode(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): boolean {
+  return env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1";
+}

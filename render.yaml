@@ -218,7 +218,9 @@ services:
       - key: INGEST_STORE_RAW_PAYLOAD
         value: "false"
       - key: POLYMARKET_SCAN_WALLET_BATCH
-        value: "8"
+        value: "12"
+      - key: POLYMARKET_SCAN_WHALE_LIMIT
+        value: "100"
       - key: US_MARKET_CATALOG_WARM_MIN
         value: "3000"
       - key: US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN
@@ -232,32 +234,31 @@ services:
       - key: COPY_INTEL_SOURCE
         value: polymarketscan
       - key: US_COMPAT_STRICT_MODE
-        value: "true"
-      - key: US_COMPAT_MIN_CONFIDENCE
-        value: "0.90"
-      - key: COPY_US_REQUIRE_COMPAT_POSITION
-        value: "true"
-      - key: COPY_US_COMPAT_MAX_GATE_CHECKS
-        value: "2"
-      - key: COPY_US_COMPAT_MAX_LEADERS
-        value: "5"
-      - key: COPY_LIVE_MAX_LEADERS
-        value: "5"
-      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
         value: "false"
+      - key: US_COMPAT_MIN_CONFIDENCE
+        value: "0.75"
+      - key: US_COMPAT_TRY_GLOBAL_SLUG
+        value: "true"
+      - key: US_COMPAT_RELAXED_SLUG
+        value: "true"
+      - key: COPY_US_BROAD_INTEL
+        value: "true"
+      - key: COPY_US_REQUIRE_COMPAT_POSITION
+        value: "false"
+      - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
+        value: "true"
+      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
+        value: "true"
+      - key: COPY_LIVE_MAX_LEADERS
+        value: "100"
+      - key: COPY_LIVE_CANDIDATE_POOL
+        value: "1000"
       - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
         value: "false"
       - key: WORKER_INTERVAL_PORTFOLIO_HEALTH_MS
         value: "86400000"
       - key: COPY_AUTO_WALLET_ACTIVITY_BATCH
         value: "60"
-      - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
-        value: "false"
-      - key: COPY_LIVE_CANDIDATE_POOL
-        value: "1000"
-      - key: COPY_LIVE_MAX_LEADERS
-        value: "100"
-      - key: COPY_LIVE_MAX_ORDERS_PER_RUN
         value: "20"
       - key: POSITION_SYNC_COPY_BATCH
         value: "100"

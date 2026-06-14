@@ -1,5 +1,5 @@
 import { prisma } from "@augurium/database";
-import { usePolymarketScanIntel } from "@augurium/shared";
+import { usePolymarketScanIntel, isUsBroadIntelMode } from "@augurium/shared";
 import {
   applyRiskToDecision,
   buildTraderTruth,
@@ -28,7 +28,7 @@ export async function refreshCopyTraderControls(): Promise<{
   evaluated: number;
   copyEnabled: number;
 }> {
-  if (usePolymarketScanIntel()) {
+  if (usePolymarketScanIntel() && !isUsBroadIntelMode()) {
     const [evaluated, copyEnabled] = await Promise.all([
       prisma.copyTraderControl.count(),
       prisma.copyTraderControl.count({ where: { enabled: true } }),
@@ -93,7 +93,7 @@ export async function refreshCopyTraderControls(): Promise<{
 export async function loadTopCopyLeaderIds(): Promise<string[]> {
   const maxLeaders = copyMaxLeaders();
 
-  if (usePolymarketScanIntel()) {
+  if (usePolymarketScanIntel() && !isUsBroadIntelMode()) {
     const rows = await prisma.copyTraderControl.findMany({
       where: { enabled: true },
       orderBy: [{ copyScore: "desc" }, { evaluatedAt: "desc" }],
