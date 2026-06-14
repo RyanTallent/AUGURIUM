@@ -46,7 +46,13 @@ export interface UsCompatibilityMatch {
 }
 
 function normalizeTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/\s+/g, " ");
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/°\s*[cf]\b/g, " degrees ")
+    .replace(/[?!.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const CATEGORY_KEYWORDS = [
@@ -290,10 +296,28 @@ async function tryEventSlugCandidates(
   return null;
 }
 
+async function lookupActiveUsMarketBySlug(
+  client: ReturnType<typeof getPolymarketUsClient>,
+  globalSlug: string,
+): Promise<{ slug: string; usTitle: string } | null> {
+  for (const candidate of buildUsSlugCandidates(globalSlug)) {
+    try {
+      const retrieved = await client.markets.retrieveBySlug(candidate);
+      const market = retrieved.market;
+      if (!market || market.closed || market.active === false) continue;
+      return { slug: candidate, usTitle: readUsMarketTitle(retrieved) };
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null;
+}
+
 async function trySlugCandidates(
   client: ReturnType<typeof getPolymarketUsClient>,
   globalSlug: string,
   expectedTitle: string,
+  acceptActiveWithoutTitleMatch = false,
 ): Promise<string | null> {
   for (const candidate of buildUsSlugCandidates(globalSlug)) {
     try {
@@ -302,7 +326,7 @@ async function trySlugCandidates(
       if (market?.closed || market?.active === false) continue;
 
       const usTitle = readUsMarketTitle(retrieved);
-      if (usMarketTitlesMatch(expectedTitle, usTitle)) {
+      if (usMarketTitlesMatch(expectedTitle, usTitle) || acceptActiveWithoutTitleMatch) {
         return candidate;
       }
       console.warn(
@@ -333,6 +357,7 @@ async function verifyUsMarketActive(
   client: ReturnType<typeof getPolymarketUsClient>,
   slug: string,
   expectedTitle: string,
+  trustActiveSlug = false,
 ): Promise<{ ok: boolean; usTitle: string; confidence: number }> {
   try {
     const retrieved = await client.markets.retrieveBySlug(slug);
@@ -342,6 +367,9 @@ async function verifyUsMarketActive(
     }
     const usTitle = readUsMarketTitle(retrieved);
     const confidence = titleMatchConfidence(expectedTitle, usTitle);
+    if (trustActiveSlug) {
+      return { ok: true, usTitle, confidence: Math.max(confidence, 0.9) };
+    }
     return { ok: confidence >= getUsMatchMinConfidence(), usTitle, confidence };
   } catch {
     return { ok: false, usTitle: "", confidence: 0 };
@@ -435,6 +463,52 @@ export async function matchUsMarketFromCatalog(
   return best;
 }
 
+async function searchUsApiExactTitle(
+  client: ReturnType<typeof getPolymarketUsClient>,
+  expectedTitle: string,
+): Promise<UsCompatibilityMatch> {
+  const expectedNorm = normalizeTitle(expectedTitle);
+  const queries = buildSearchQueries(expectedTitle);
+  let best: UsCompatibilityMatch = {
+    slug: null,
+    confidence: 0,
+    reason: "no exact US API title match",
+  };
+
+  for (const query of queries) {
+    try {
+      const search = await client.search.query({ query, limit: 32, status: "active" });
+      for (const event of search.events ?? []) {
+        for (const m of event.markets ?? []) {
+          if (!m.slug || !m.active || m.closed) continue;
+          const marketTitle = readSearchMarketTitle(m as { title?: string; question?: string });
+          const marketNorm = normalizeTitle(marketTitle);
+          if (marketNorm !== expectedNorm && !usMarketTitlesMatch(expectedTitle, marketTitle)) {
+            continue;
+          }
+          const confidence =
+            marketNorm === expectedNorm ? 1 : titleMatchConfidence(expectedTitle, marketTitle);
+          if (confidence > best.confidence) {
+            best = {
+              slug: m.slug,
+              confidence,
+              reason:
+                marketNorm === expectedNorm
+                  ? "exact title match"
+                  : `exact US API title search (${(confidence * 100).toFixed(0)}%)`,
+              usTitle: marketTitle,
+            };
+          }
+        }
+      }
+    } catch {
+      // continue queries
+    }
+  }
+
+  return best;
+}
+
 async function searchUsApiByTitle(
   client: ReturnType<typeof getPolymarketUsClient>,
   expectedTitle: string,
@@ -488,21 +562,53 @@ export async function resolveUsMarketForExecution(
 
   if (tryGlobalSlug && leader.slug?.trim()) {
     const globalSlug = leader.slug.trim();
-    const slugHit =
-      (await trySlugCandidates(client, globalSlug, leader.title)) ??
-      (await tryEventSlugCandidates(client, globalSlug, leader.title));
+    let slugHit = await trySlugCandidates(client, globalSlug, leader.title);
+    let trustSlug = false;
+    if (!slugHit && relaxedSlug) {
+      slugHit = await trySlugCandidates(client, globalSlug, leader.title, true);
+      trustSlug = Boolean(slugHit);
+    }
+    if (!slugHit) {
+      slugHit = await tryEventSlugCandidates(client, globalSlug, leader.title);
+    }
+
     if (slugHit) {
-      const verified = await verifyUsMarketActive(client, slugHit, leader.title);
-      if (verified.ok || relaxedSlug) {
+      const verified = await verifyUsMarketActive(client, slugHit, leader.title, trustSlug);
+      if (verified.ok) {
         return {
           slug: slugHit,
-          confidence: Math.max(verified.confidence, relaxedSlug ? 0.85 : 0),
-          reason: relaxedSlug
-            ? `global slug on US (relaxed): ${slugHit}`
+          confidence: verified.confidence,
+          reason: trustSlug
+            ? `direct US slug (active): ${slugHit}`
             : `global slug on US: ${slugHit}`,
           usTitle: verified.usTitle,
         };
       }
+    }
+
+    if (relaxedSlug) {
+      const direct = await lookupActiveUsMarketBySlug(client, globalSlug);
+      if (direct) {
+        return {
+          slug: direct.slug,
+          confidence: 0.9,
+          reason: `direct US slug (active): ${direct.slug}`,
+          usTitle: direct.usTitle,
+        };
+      }
+    }
+  }
+
+  const exactSearch = await searchUsApiExactTitle(client, leader.title);
+  if (exactSearch.slug && exactSearch.confidence >= minConfidence) {
+    const verified = await verifyUsMarketActive(client, exactSearch.slug, leader.title);
+    if (verified.ok) {
+      return {
+        slug: exactSearch.slug,
+        confidence: verified.confidence,
+        reason: `api-exact+verified: ${exactSearch.reason}`,
+        usTitle: verified.usTitle,
+      };
     }
   }
 
@@ -532,7 +638,24 @@ export async function resolveUsMarketForExecution(
     }
   }
 
-  const best = catalogMatch.confidence >= searchMatch.confidence ? catalogMatch : searchMatch;
+  const candidates = [exactSearch, catalogMatch, searchMatch].filter((m) => m.slug);
+  const best = candidates.reduce<UsCompatibilityMatch>(
+    (acc, cur) => (cur.confidence > acc.confidence ? cur : acc),
+    { slug: null, confidence: 0, reason: "no US match" },
+  );
+
+  if (best.slug && relaxedSlug && best.confidence >= 0.5) {
+    const verified = await verifyUsMarketActive(client, best.slug, leader.title);
+    if (verified.ok) {
+      return {
+        slug: best.slug,
+        confidence: verified.confidence,
+        reason: `relaxed+verified: ${best.reason}`,
+        usTitle: verified.usTitle,
+      };
+    }
+  }
+
   if (best.confidence < minConfidence) {
     return {
       slug: null,

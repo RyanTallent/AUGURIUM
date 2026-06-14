@@ -636,6 +636,43 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     `[worker] live copy leaders=${copyLeaderIds.length} sourcePositions=${sources.length}`,
   );
 
+  if (cfg.provider === "polymarket-us" && readiness.ready) {
+    const retryBlocked = await prisma.copyLiveMirror.findMany({
+      where: {
+        status: "BLOCKED",
+        blockReason: { contains: "uncertain match", mode: "insensitive" },
+      },
+      include: {
+        market: { select: { title: true, slug: true, category: true } },
+      },
+      take: 30,
+    });
+    for (const mirror of retryBlocked) {
+      const gate = await evaluateUsCompatibilityGate({
+        globalMarketId: mirror.marketId,
+        globalTitle: mirror.market.title,
+        globalSlug: mirror.market.slug,
+        side: mirror.side,
+        category: mirror.market.category,
+      });
+      if (gate.allowed && gate.usMarketSlug) {
+        await prisma.copyLiveMirror.update({
+          where: { id: mirror.id },
+          data: {
+            status: "PENDING",
+            blockReason: null,
+            usMarketSlug: gate.usMarketSlug,
+            matchConfidence: gate.confidence,
+            matchReason: gate.reason,
+          },
+        });
+        console.log(
+          `[worker] live copy unblocked mirror=${mirror.id} slug=${gate.usMarketSlug} conf=${gate.confidence.toFixed(2)}`,
+        );
+      }
+    }
+  }
+
   const sourceKeys = new Set(sources.map((s) => s.sourcePositionKey));
   let provider: ExecutionProvider | null = null;
   let client: ReturnType<typeof getPolymarketUsClient> | null = null;
@@ -905,6 +942,9 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
 
         if (!gate.allowed || !gate.usMarketSlug) {
           const blockReason = gate.reason;
+          console.warn(
+            `[worker] live copy gate blocked mirror=${mirror.id} conf=${gate.confidence.toFixed(2)} reason=${blockReason}`,
+          );
           await prisma.copyLiveMirror.update({
             where: { id: mirror.id },
             data: {

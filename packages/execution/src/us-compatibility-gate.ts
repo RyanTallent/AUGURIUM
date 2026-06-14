@@ -31,7 +31,10 @@ export async function evaluateUsCompatibilityGate(
   };
 
   const match = await resolveUsMarketForExecution(leader);
-  const allowed = Boolean(match.slug) && match.confidence >= minConfidence;
+  const trusted =
+    match.reason.includes("direct US slug") || match.reason.includes("exact title match");
+  const allowed =
+    Boolean(match.slug) && (match.confidence >= minConfidence || trusted);
 
   return {
     allowed,

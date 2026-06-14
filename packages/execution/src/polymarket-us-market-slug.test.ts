@@ -61,4 +61,14 @@ describe("usMarketTitlesMatch", () => {
       false,
     );
   });
+
+  it("accepts temperature titles with degree formatting differences", () => {
+    assert.equal(
+      usMarketTitlesMatch(
+        "Will the highest temperature in Seattle be between 60-61°F on Jun 12?",
+        "Will the highest temperature in Seattle be between 60-61 degrees on Jun 12",
+      ),
+      true,
+    );
+  });
 });

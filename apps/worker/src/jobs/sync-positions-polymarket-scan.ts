@@ -23,9 +23,18 @@ async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<s
         ...(conditionId ? [{ conditionId }] : []),
       ],
     },
-    select: { id: true },
+    select: { id: true, slug: true },
   });
-  if (existing) return existing.id;
+  if (existing) {
+    const eventSlug = trade.event_slug?.trim() || null;
+    if (eventSlug && !existing.slug) {
+      await prisma.market.update({
+        where: { id: existing.id },
+        data: { slug: eventSlug, eventSlug },
+      });
+    }
+    return existing.id;
+  }
 
   try {
     const row = await prisma.market.create({
@@ -126,9 +135,11 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
   let synced = 0;
 
   for (const pos of nets) {
+    const sample = res.data.find((t) => t.market === pos.conditionId);
     const marketId = await ensureGlobalMarketForScanTrade({
       market: pos.conditionId,
-      market_question: res.data.find((t) => t.market === pos.conditionId)?.market_question ?? pos.side,
+      market_question: sample?.market_question ?? pos.side,
+      event_slug: sample?.event_slug,
       outcome: pos.side,
       side: "BUY",
       price: pos.avgPrice,
