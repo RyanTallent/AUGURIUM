@@ -3,17 +3,6 @@ import { evaluateUsCompatibilityGate } from "@augurium/execution";
 import { isUsOnlyLiveCopyMode, isUsBroadIntelMode } from "@augurium/shared";
 import { polymarketScanFetch, type ScanWalletTrade } from "./polymarket-scan.js";
 
-const GLOBAL_ONLY_PATTERNS = [
-  /\bhighest temperature\b/i,
-  /\btemperature in\b/i,
-  /\btemperature be\b/i,
-  /\btemperature between\b/i,
-  /\b\d+°[cf]\b/i,
-  /\b\d+°c\b/i,
-  /\b\d+°f\b/i,
-  /\bbetween \d+.+\d+°/i,
-];
-
 const US_LIKELY_PATTERNS = [
   /\bcounter-strike\b/i,
   /\bvalorant\b/i,
@@ -31,15 +20,15 @@ const US_LIKELY_PATTERNS = [
   /\belection\b/i,
   /\bsuper bowl\b/i,
   /\bworld series\b/i,
+  /\btemperature\b/i,
+  /\bweather\b/i,
 ];
 
 const MAX_FULL_GATE_POSITIONS = Number(process.env.COPY_US_COMPAT_MAX_GATE_CHECKS ?? "2");
 const MAX_FULL_GATE_LEADERS = Number(process.env.COPY_US_COMPAT_MAX_LEADERS ?? "5");
 
-export function isLikelyGlobalOnlyMarketTitle(title: string): boolean {
-  const t = title.trim();
-  if (!t) return false;
-  return GLOBAL_ONLY_PATTERNS.some((p) => p.test(t));
+export function isLikelyGlobalOnlyMarketTitle(_title: string): boolean {
+  return false;
 }
 
 export function isLikelyUsOverlapMarketTitle(title: string): boolean {

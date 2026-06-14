@@ -223,6 +223,8 @@ services:
         value: "100"
       - key: US_MARKET_CATALOG_WARM_MIN
         value: "3000"
+      - key: US_MARKET_CATALOG_QUERIES
+        value: "mlb,nba,nfl,nhl,soccer,esports,valorant,cs2,dota,politics,weather,temperature,highest"
       - key: US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN
         value: "80"
       - key: COPY_AUTO_PIPELINE_ENABLED

@@ -11,7 +11,7 @@ import {
 const STREAM = "polymarket-us:markets:catalog";
 const SEARCH_QUERIES = (
   process.env.US_MARKET_CATALOG_QUERIES ??
-  "mlb,nba,nfl,nhl,soccer,esports,valorant,cs2,dota,politics"
+  "mlb,nba,nfl,nhl,soccer,esports,valorant,cs2,dota,politics,weather,temperature,highest"
 ).split(",");
 const MARKETS_PER_QUERY = Number(process.env.US_MARKET_CATALOG_LIMIT_PER_QUERY ?? "40");
 const WARM_MIN = Number(process.env.US_MARKET_CATALOG_WARM_MIN ?? "3000");

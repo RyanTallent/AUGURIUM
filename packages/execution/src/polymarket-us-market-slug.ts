@@ -199,6 +199,14 @@ function buildSearchQueries(title: string): string[] {
   if (norm.includes("valorant")) queries.add("valorant");
   if (norm.includes("counter-strike") || norm.includes("cs2")) queries.add("cs2");
   if (norm.includes("dota")) queries.add("dota2");
+  if (norm.includes("temperature") || norm.includes("°")) {
+    queries.add("temperature");
+    const cityMatch = title.match(/\bin\s+([^,?]+?)(?:\s+be|\s+between|\?)/i);
+    if (cityMatch) {
+      const city = cityMatch[1].trim();
+      if (city.length >= 3) queries.add(city.slice(0, 80));
+    }
+  }
 
   return [...queries];
 }
@@ -350,24 +358,26 @@ function extractCatalogSearchTokens(title: string): string[] {
   }
 
   const norm = normalizeTitle(title);
-  const stop = new Set([
-    "will",
-    "the",
-    "highest",
-    "between",
-    "what",
-    "who",
-    "when",
-    "june",
-    "july",
-    "may",
-    "april",
-  ]);
-  return norm
-    .split(/\s+/)
-    .map((t) => t.replace(/[^a-z0-9.+-]/g, ""))
-    .filter((t) => t.length >= 4 && !stop.has(t))
-    .slice(0, 6);
+  const stop = new Set(["will", "the", "what", "who", "when"]);
+  const tokens: string[] = [];
+
+  if (norm.includes("temperature")) {
+    const cityMatch = title.match(/\bin\s+([^,?]+?)(?:\s+be|\s+between|\?)/i);
+    if (cityMatch) {
+      const city = cityMatch[1].trim().toLowerCase();
+      for (const part of city.split(/\s+/)) {
+        if (part.length >= 3) tokens.push(part.replace(/[^a-z0-9]/g, ""));
+      }
+    }
+    tokens.push("temperature");
+  }
+
+  for (const t of norm.split(/\s+/)) {
+    const cleaned = t.replace(/[^a-z0-9.+-]/g, "");
+    if (cleaned.length >= 4 && !stop.has(cleaned)) tokens.push(cleaned);
+  }
+
+  return [...new Set(tokens)].slice(0, 8);
 }
 
 /** Match leader global market metadata against US catalog rows (no global slug translation). */
