@@ -1,4 +1,5 @@
 import { prisma } from "@augurium/database";
+import { mapToSpecialtyBucket } from "@augurium/shared";
 import { positionExternalKey } from "../lib/polymarket.js";
 import {
   storeRawPayload,
@@ -21,6 +22,7 @@ async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<s
     trade.market_question?.trim() ||
     `Scan market ${trade.market.slice(0, Math.min(12, trade.market.length))}`;
   const eventSlug = trade.event_slug?.trim() || null;
+  const category = mapToSpecialtyBucket({ title, slug: eventSlug });
   const isCondition = trade.market.startsWith("0x");
   const externalId = isCondition ? trade.market : `scan:${trade.market}`;
 
@@ -51,6 +53,7 @@ async function ensureGlobalMarketForScanTrade(trade: ScanWalletTrade): Promise<s
         title,
         slug: eventSlug,
         eventSlug,
+        category,
         active: true,
       },
     });

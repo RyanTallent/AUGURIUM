@@ -20,7 +20,7 @@ function aggregateTopFails(
 
 export async function GET() {
   try {
-    const [byStatus, recentOpen, recentSubmitted, recentBlocked, latestPipeline, copyEnabled, disabledControls] =
+    const [byStatus, recentOpen, recentSubmitted, recentBlocked, latestPipeline, copyEnabled, disabledControls, enabledLeaderRows] =
       await Promise.all([
       prisma.copyLiveMirror.groupBy({
         by: ["status"],
@@ -64,6 +64,16 @@ export async function GET() {
         take: 200,
         orderBy: { evaluatedAt: "desc" },
       }),
+      prisma.copyTraderControl.findMany({
+        where: { enabled: true },
+        select: {
+          trader: { select: { bestCategory: true, address: true } },
+          copyScore: true,
+          strengths: true,
+        },
+        orderBy: { copyScore: "desc" },
+        take: 30,
+      }),
     ]);
 
     const statusCounts = Object.fromEntries(byStatus.map((r) => [r.status, r._count]));
@@ -75,6 +85,11 @@ export async function GET() {
       ? (pipelineMeta.topFails as Array<{ reason: string; count: number }>)
       : null;
     const topFails = pipelineTopFails ?? aggregateTopFails(disabledControls);
+    const leadersByCategory = enabledLeaderRows.reduce<Record<string, number>>((acc, row) => {
+      const cat = row.trader.bestCategory ?? "Other";
+      acc[cat] = (acc[cat] ?? 0) + 1;
+      return acc;
+    }, {});
 
     const mapMirror = (m: {
       id: string;
@@ -106,6 +121,13 @@ export async function GET() {
       statusCounts,
       copyEnabled,
       topFails,
+      leadersByCategory,
+      enabledLeaders: enabledLeaderRows.map((r) => ({
+        address: r.trader.address,
+        category: r.trader.bestCategory,
+        copyScore: r.copyScore,
+        strengths: r.strengths,
+      })),
       hasLiveTrade: recentOpen.length > 0 || recentSubmitted.length > 0,
       openMirrors: recentOpen.map(mapMirror),
       submittedMirrors: recentSubmitted.map(mapMirror),

@@ -9,6 +9,8 @@ export interface ScoringV1Input {
   activeDays?: number;
   specialistScore?: number;
   recentFormScore?: number;
+  /** When true, US match is enforced separately — do not double-penalize confidence. */
+  usMatchHardGated?: boolean;
 }
 
 export interface ScoringV1Result {
@@ -85,7 +87,8 @@ export function computeScoringV1(input: ScoringV1Input): ScoringV1Result {
   const categorySpecialty = clamp100(specialist * 100);
   const usMatchPct = clamp100(usMatch * 100);
 
-  const uncertaintyPenalty = usMatch < 0.9 ? clamp100((0.9 - usMatch) * 120) : 0;
+  const uncertaintyPenalty =
+    input.usMatchHardGated || usMatch >= 0.9 ? 0 : clamp100((0.9 - usMatch) * 120);
 
   const confidence = clamp100(
     lifetime * 0.35 +

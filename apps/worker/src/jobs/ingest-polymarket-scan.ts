@@ -7,6 +7,10 @@ import {
   upsertTraderFromWallet,
 } from "../lib/ingestion-store.js";
 import {
+  buildBalancedScanWalletList,
+  parseDeprioritizedWallets,
+} from "../lib/scan-category-discovery.js";
+import {
   polymarketScanFetch,
   type ScanTraderBadge,
   type ScanWalletPnlSummary,
@@ -120,7 +124,11 @@ async function collectLeaderWallets(): Promise<string[]> {
     where: { stream: STREAM_LEADERBOARD },
     select: { metadata: true },
   });
-  const meta = cursor?.metadata as { wallets?: string[]; walletListCachedAt?: string } | null;
+  const meta = cursor?.metadata as {
+    wallets?: string[];
+    walletListCachedAt?: string;
+    deprioritizedWallets?: Record<string, { until?: string }>;
+  } | null;
   if (meta?.wallets?.length && meta.walletListCachedAt) {
     const age = Date.now() - new Date(meta.walletListCachedAt).getTime();
     if (age < WALLET_LIST_CACHE_MS) {
@@ -129,37 +137,47 @@ async function collectLeaderWallets(): Promise<string[]> {
     }
   }
 
-  const wallets = new Set<string>();
+  const deprioritized = parseDeprioritizedWallets(meta);
 
   const watchlist = await prisma.usLeaderWatchlist.findMany({
     where: { enabled: true },
     select: { wallet: true },
   });
-  for (const w of watchlist) wallets.add(w.wallet.toLowerCase());
+  const watchlistWallets = watchlist.map((w) => w.wallet.toLowerCase());
 
+  const leaderboardWallets: string[] = [];
   const legacy = await polymarketScanFetch<unknown[]>("leaderboard");
   if (legacy.ok && Array.isArray(legacy.data)) {
     for (const row of legacy.data as Array<{ wallet?: string }>) {
-      if (row.wallet) wallets.add(row.wallet.toLowerCase());
+      if (row.wallet) leaderboardWallets.push(row.wallet.toLowerCase());
     }
   }
 
   const whales = await polymarketScanFetch<ScanWhaleRow[]>("whales", { limit: WHALE_LIMIT });
   await storeRawPayload("polymarket-scan", `whales?limit=${WHALE_LIMIT}`, whales);
-  if (whales.ok && whales.data) {
-    for (const row of whales.data) {
-      if (row.wallet) wallets.add(row.wallet.toLowerCase());
-    }
-  }
 
-  const list = [...wallets];
+  const list = buildBalancedScanWalletList({
+    whales: whales.ok && whales.data ? whales.data : [],
+    watchlist: watchlistWallets,
+    leaderboard: leaderboardWallets,
+    deprioritized,
+    maxWallets: WHALE_LIMIT,
+  });
+
   await prisma.syncCursor.update({
     where: { stream: STREAM_LEADERBOARD },
     data: {
-      metadata: { wallets: list, walletListCachedAt: new Date().toISOString() },
+      metadata: {
+        ...meta,
+        wallets: list,
+        walletListCachedAt: new Date().toISOString(),
+        deprioritizedWallets: meta?.deprioritizedWallets,
+      },
     },
   });
-  console.log(`[polymarket-scan] wallet list refreshed count=${list.length}`);
+  console.log(
+    `[polymarket-scan] wallet list refreshed count=${list.length} deprioritized=${deprioritized.size}`,
+  );
   return list;
 }
 

@@ -43,15 +43,27 @@ export function evaluateCopyV1LeaderGate(input: {
   truth: TraderTruthMetrics;
   usMatchConfidence?: number;
   recentDrawdown?: number;
+  specialistScore?: number;
 }): CopyV1GateResult {
-  const t = getCopyV1Thresholds();
   const scores = computeScoringV1({
     truth: input.truth,
     usMatchConfidence: input.usMatchConfidence,
     recentDrawdown: input.recentDrawdown,
+    specialistScore: input.specialistScore,
+    usMatchHardGated: true,
   });
   const reasons: string[] = [];
+  const t = getCopyV1Thresholds();
 
+  if ((input.usMatchConfidence ?? 0) < t.minUsMatch) {
+    reasons.push(`US match ${((input.usMatchConfidence ?? 0) * 100).toFixed(0)}% < ${t.minUsMatch * 100}%`);
+  }
+  if (input.truth.tradeCount < t.minTradeCount) {
+    reasons.push(`trade count ${input.truth.tradeCount} < ${t.minTradeCount}`);
+  }
+  if (input.truth.winRate < t.minWinRate) {
+    reasons.push(`win rate ${(input.truth.winRate * 100).toFixed(0)}% < ${t.minWinRate * 100}%`);
+  }
   if (scores.lifetime < t.minLifetime) reasons.push(`lifetime ${scores.lifetime} < ${t.minLifetime}`);
   if (scores.heat < t.minHeat) reasons.push(`heat ${scores.heat} < ${t.minHeat}`);
   if (scores.confidence < t.minConfidence) {
@@ -63,18 +75,9 @@ export function evaluateCopyV1LeaderGate(input: {
   if (scores.conviction < t.minConviction) {
     reasons.push(`conviction ${scores.conviction} < ${t.minConviction}`);
   }
-  if (input.truth.winRate < t.minWinRate) {
-    reasons.push(`win rate ${(input.truth.winRate * 100).toFixed(0)}% < ${t.minWinRate * 100}%`);
-  }
-  if (input.truth.tradeCount < t.minTradeCount) {
-    reasons.push(`trade count ${input.truth.tradeCount} < ${t.minTradeCount}`);
-  }
   const recentDd = input.recentDrawdown ?? input.truth.maxDrawdown;
   if (recentDd > t.maxRecentDrawdown) {
     reasons.push(`recent drawdown ${(recentDd * 100).toFixed(0)}% > ${t.maxRecentDrawdown * 100}%`);
-  }
-  if ((input.usMatchConfidence ?? 0) < t.minUsMatch) {
-    reasons.push(`US match ${((input.usMatchConfidence ?? 0) * 100).toFixed(0)}% < ${t.minUsMatch * 100}%`);
   }
 
   return { pass: reasons.length === 0, scores, reasons };

@@ -140,3 +140,12 @@ export {
   type DiscordWebhookChannel,
 } from "./discord-config.js";
 export { isUsOnlyLiveCopyMode, usePolymarketScanIntel, requirePolymarketUsForLiveCopy, isUsBroadIntelMode, getUsCompatMinConfidence, shouldTryGlobalSlugOnUs, shouldRelaxUsSlugMatch } from "./us-copy-mode.js";
+export {
+  SPECIALTY_BUCKETS,
+  US_POLYGON_CATEGORY_SLUGS,
+  DISCOVERY_BUCKET_ORDER,
+  mapToSpecialtyBucket,
+  discoveryBucketQuota,
+  formatSpecialtyBucketLabel,
+  type SpecialtyBucket,
+} from "./us-market-categories.js";
