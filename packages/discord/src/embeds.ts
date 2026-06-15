@@ -29,6 +29,22 @@ function liveCopyPayload(embed: DiscordEmbed): DiscordEventPayload {
   };
 }
 
+/** Live US copy is armed — portfolio/COPY ops embeds should not say shadow-only. */
+export function isLiveCopyDiscordContext(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): boolean {
+  const ready = env.POLYMARKET_US_READY;
+  return (
+    env.EXECUTION_PROVIDER === "polymarket-us" &&
+    env.LIVE_COPY_ENABLED === "true" &&
+    (ready === "true" || ready === "1" || ready === "yes")
+  );
+}
+
+function contextualPayload(embed: DiscordEmbed): DiscordEventPayload {
+  return isLiveCopyDiscordContext() ? liveCopyPayload(embed) : payload(embed);
+}
+
 export function buildSignalAlertEmbed(input: {
   marketTitle: string;
   side: string;
@@ -146,7 +162,7 @@ export function buildPortfolioEmbed(input: {
   fields: { name: string; value: string; inline?: boolean }[];
   dashboardUrl: string;
 }): DiscordEventPayload {
-  return payload({
+  return contextualPayload({
     title: input.title,
     description: input.description,
     color: 0x8b5cf6,
@@ -165,7 +181,7 @@ export function buildCopyBoardChangeEmbed(input: {
   dashboardUrl: string;
 }): DiscordEventPayload {
   const fmt = (w: string) => `\`${w.slice(0, 6)}…${w.slice(-4)}\``;
-  return payload({
+  return contextualPayload({
     title: "📋 COPY list changed",
     description: "Top efficiency COPY targets updated.",
     color: COLORS.trader,

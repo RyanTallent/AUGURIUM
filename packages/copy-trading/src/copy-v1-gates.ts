@@ -1,3 +1,4 @@
+import { usePolymarketScanIntel } from "@augurium/shared";
 import { leaderPositionRoi } from "./copy-mirror-rules.js";
 import { computeScoringV1, type ScoringV1Result } from "./scoring-v1.js";
 import type { TraderTruthMetrics } from "./trader-truth.js";
@@ -16,8 +17,10 @@ export interface CopyV1Thresholds {
 }
 
 export function getCopyV1Thresholds(): CopyV1Thresholds {
+  // Scan summaries cap lifetime ~82 for strong leaders; 85 is unreachable without full trade history.
+  const scanLifetimeDefault = usePolymarketScanIntel() ? "80" : "85";
   return {
-    minLifetime: Number(process.env.COPY_V1_MIN_LIFETIME ?? "85"),
+    minLifetime: Number(process.env.COPY_V1_MIN_LIFETIME ?? scanLifetimeDefault),
     minHeat: Number(process.env.COPY_V1_MIN_HEAT ?? "75"),
     minConfidence: Number(process.env.COPY_V1_MIN_CONFIDENCE ?? "80"),
     maxUncertainty: Number(process.env.COPY_V1_MAX_UNCERTAINTY ?? "35"),

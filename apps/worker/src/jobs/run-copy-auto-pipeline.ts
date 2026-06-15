@@ -233,6 +233,8 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
           liveReady,
           liveMirrorsBlocked,
           mirrorsSubmitted,
+          copyEnabled: controls.copyEnabled,
+          topFails: controls.topFails,
           bankrollUsd: live.bankrollUsd,
           availableUsd: live.availableUsd,
           deployedUsd: live.deployedUsd,

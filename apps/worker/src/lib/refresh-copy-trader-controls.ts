@@ -46,6 +46,7 @@ function refreshEvaluateBatch(): number {
 export async function refreshCopyTraderControls(): Promise<{
   evaluated: number;
   copyEnabled: number;
+  topFails: Array<{ reason: string; count: number }>;
 }> {
   const pool = Math.min(refreshEvaluateBatch(), copyCandidatePoolSize());
   const gateLimit = usGateRefreshLimit();
@@ -84,7 +85,7 @@ export async function refreshCopyTraderControls(): Promise<{
     ) {
       const compat = await scoreTraderUsLiveCompat(t.id, t.address, {
         catalogOnly: true,
-        allowScanFetch: false,
+        allowScanFetch: true,
       });
       usMatch = compat.bestConfidence;
     }
@@ -143,18 +144,22 @@ export async function refreshCopyTraderControls(): Promise<{
     await notifyBrainLeaderChange({ promoted, cooled, copyEnabled });
   }
 
+  const topFails = [...failReasons.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([reason, count]) => ({ reason, count }));
+
   if (traders.length > 0) {
-    const topFails = [...failReasons.entries()]
-      .sort((a, b) => b[1] - a[1])
+    const topFailsLog = topFails
       .slice(0, 4)
-      .map(([k, n]) => `${n}x ${k}`)
+      .map(({ reason, count }) => `${count}x ${reason}`)
       .join(" | ");
     console.log(
-      `[worker] copy trader controls refreshed pool=${pool} usGate=${gateLimit} evaluated=${traders.length} copyEnabled=${copyEnabled}${topFails ? ` topFails=${topFails}` : ""}`,
+      `[worker] copy trader controls refreshed pool=${pool} usGate=${gateLimit} evaluated=${traders.length} copyEnabled=${copyEnabled}${topFailsLog ? ` topFails=${topFailsLog}` : ""}`,
     );
   }
 
-  return { evaluated: traders.length, copyEnabled };
+  return { evaluated: traders.length, copyEnabled, topFails };
 }
 
 export async function loadTopCopyLeaderIds(): Promise<string[]> {

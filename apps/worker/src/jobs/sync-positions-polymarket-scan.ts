@@ -11,6 +11,8 @@ import {
 
 const TRADE_LIMIT = Number(process.env.POLYMARKET_SCAN_TRADES_LIMIT ?? "200");
 const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "8");
+const GATE_SYNC_BATCH = Number(process.env.COPY_US_GATE_REFRESH_LIMIT ?? "12");
+const SYNC_BATCH = Math.max(COPY_BATCH, GATE_SYNC_BATCH);
 const MAX_OPEN_POSITIONS = Number(process.env.POSITION_SYNC_MAX_OPEN ?? "12");
 
 /** DB-only — no Gamma/US API (scan sync must stay fast on Render). */
@@ -203,14 +205,14 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
   const controls = await prisma.copyTraderControl.findMany({
     where: { enabled: true },
     orderBy: { evaluatedAt: "desc" },
-    take: COPY_BATCH,
+    take: SYNC_BATCH,
     include: { trader: true },
   });
 
   const scanLeaders = await prisma.trader.findMany({
     where: { discoveredVia: "polymarket-scan", lastScoredAt: { not: null } },
     orderBy: { rankingScore: "desc" },
-    take: COPY_BATCH,
+    take: SYNC_BATCH,
     select: { id: true, address: true },
   });
 
@@ -224,7 +226,7 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
 
   const watchlist = await prisma.usLeaderWatchlist.findMany({
     where: { enabled: true },
-    take: COPY_BATCH,
+    take: SYNC_BATCH,
   });
 
   console.log(

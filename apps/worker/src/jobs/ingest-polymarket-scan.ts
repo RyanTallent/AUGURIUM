@@ -65,7 +65,8 @@ async function upsertScanMetricsSnapshot(
     (tradeCount >= 100 ? 0.55 : tradeCount / 200) + winRate * 0.35 + Math.min(0.1, roi),
   );
   const recentForm = Math.min(1, winRate * 0.7 + Math.max(0, roi) * 0.3);
-  const maxDrawdown = roi > 0.2 ? 0.08 : roi > 0 ? 0.12 : 0.2;
+  // wallet_pnl is lifetime-only — do not deflate period ROI (was blocking v1 heat/lifetime scores)
+  const maxDrawdown = roi > 0.15 ? 0.05 : roi > 0 ? 0.08 : roi > -0.05 ? 0.12 : 0.2;
   const tier = scanTier(tradeCount, winRate, roi);
 
   await prisma.traderMetricsSnapshot.create({
@@ -88,8 +89,8 @@ async function upsertScanMetricsSnapshot(
       profitFactor: winRate > 0 ? winRate / Math.max(0.05, 1 - winRate) : 0,
       maxDrawdown,
       consistencyScore: recentForm,
-      roi7d: roi * 0.35,
-      roi30d: roi * 0.65,
+      roi7d: roi,
+      roi30d: roi,
       roi90d: roi,
       roi180d: roi,
       volume7d: 0,

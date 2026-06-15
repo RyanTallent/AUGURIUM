@@ -3,9 +3,25 @@ import { prisma } from "@augurium/database";
 
 export const dynamic = "force-dynamic";
 
+function aggregateTopFails(
+  rows: Array<{ disabledReason: string | null }>,
+): Array<{ reason: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.disabledReason) continue;
+    const key = row.disabledReason.split(" < ")[0] ?? row.disabledReason;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([reason, count]) => ({ reason, count }));
+}
+
 export async function GET() {
   try {
-    const [byStatus, recentOpen, recentSubmitted, recentBlocked, latestPipeline] = await Promise.all([
+    const [byStatus, recentOpen, recentSubmitted, recentBlocked, latestPipeline, copyEnabled, disabledControls] =
+      await Promise.all([
       prisma.copyLiveMirror.groupBy({
         by: ["status"],
         _count: true,
@@ -41,6 +57,13 @@ export async function GET() {
         where: { source: "copy:auto-pipeline", status: "completed" },
         orderBy: { finishedAt: "desc" },
       }),
+      prisma.copyTraderControl.count({ where: { enabled: true } }),
+      prisma.copyTraderControl.findMany({
+        where: { enabled: false },
+        select: { disabledReason: true },
+        take: 200,
+        orderBy: { evaluatedAt: "desc" },
+      }),
     ]);
 
     const statusCounts = Object.fromEntries(byStatus.map((r) => [r.status, r._count]));
@@ -48,6 +71,10 @@ export async function GET() {
       latestPipeline?.metadata && typeof latestPipeline.metadata === "object"
         ? (latestPipeline.metadata as Record<string, unknown>)
         : null;
+    const pipelineTopFails = Array.isArray(pipelineMeta?.topFails)
+      ? (pipelineMeta.topFails as Array<{ reason: string; count: number }>)
+      : null;
+    const topFails = pipelineTopFails ?? aggregateTopFails(disabledControls);
 
     const mapMirror = (m: {
       id: string;
@@ -77,6 +104,8 @@ export async function GET() {
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
       statusCounts,
+      copyEnabled,
+      topFails,
       hasLiveTrade: recentOpen.length > 0 || recentSubmitted.length > 0,
       openMirrors: recentOpen.map(mapMirror),
       submittedMirrors: recentSubmitted.map(mapMirror),
@@ -111,6 +140,8 @@ export async function GET() {
             finishedAt: latestPipeline.finishedAt,
             itemCount: latestPipeline.itemCount,
             mirrorsSubmitted: pipelineMeta?.mirrorsSubmitted ?? null,
+            copyEnabled: pipelineMeta?.copyEnabled ?? copyEnabled,
+            topFails: pipelineTopFails ?? topFails,
             liveReady: pipelineMeta?.liveReady ?? null,
             liveMirrorsBlocked: pipelineMeta?.liveMirrorsBlocked ?? null,
             bankrollUsd: pipelineMeta?.bankrollUsd ?? null,
