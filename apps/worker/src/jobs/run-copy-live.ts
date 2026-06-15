@@ -483,6 +483,8 @@ export interface CopyLiveJobSummary {
   tradeSizeUsd: number | null;
   bankrollSource: string | null;
   usOpenPositions: Array<{ id: string; marketId: string; side: string; sizeUsd: number }>;
+  sourcePositionCount?: number;
+  noTradeReason?: string | null;
   blockers: string[];
   message: string;
 }
@@ -659,9 +661,19 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     : await loadCopyTargetPositions();
 
   const copyLeaderIds = USE_PAPER_SOURCE ? [] : await loadTopCopyLeaderIds();
+  const sourcePositionCount = sources.length;
   console.log(
-    `[worker] live copy leaders=${copyLeaderIds.length} sourcePositions=${sources.length}`,
+    `[worker] live copy leaders=${copyLeaderIds.length} sourcePositions=${sourcePositionCount}`,
   );
+
+  let noTradeReason: string | null = null;
+  if (sourcePositionCount === 0) {
+    if (copyLeaderIds.length === 0) {
+      noTradeReason = "No COPY leaders enabled with US match ≥90%.";
+    } else {
+      noTradeReason = `${copyLeaderIds.length} enabled leader(s) but zero open positions passed US catalog + v1 entry gates.`;
+    }
+  }
 
   if (cfg.provider === "polymarket-us" && readiness.ready) {
     const retryBlocked = await prisma.copyLiveMirror.findMany({
@@ -1206,6 +1218,8 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     tradeSizeUsd,
     bankrollSource: bankroll.source,
     usOpenPositions,
+    sourcePositionCount,
+    noTradeReason: mirrorsSubmitted === 0 ? noTradeReason : null,
     blockers: readiness.blockers,
     message: blockReason
       ? `live copy blocked: ${blockReason}`

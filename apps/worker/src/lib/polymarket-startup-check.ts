@@ -4,7 +4,10 @@ import {
   hasConfigSecret,
   validateClobConnection,
   validatePolymarketUsConnection,
+  isPolymarketUsReady,
 } from "@augurium/execution";
+import { resolveLiveCopyBankroll } from "./resolve-live-copy-bankroll.js";
+import { notifyWorkerOnline } from "./live-copy-ops-discord.js";
 
 export async function logPolymarketStartupCheck(): Promise<void> {
   if (process.env.LIVE_COPY_ENABLED !== "true") return;
@@ -54,5 +57,19 @@ export async function logPolymarketStartupCheck(): Promise<void> {
   );
   if (readiness.blockers.length > 0) {
     console.log("[worker] live copy blockers:", readiness.blockers);
+  }
+
+  if (process.env.LIVE_COPY_ENABLED === "true") {
+    let bankrollUsd: number | null = null;
+    try {
+      const bankroll = await resolveLiveCopyBankroll();
+      bankrollUsd = bankroll.bankrollUsd;
+    } catch {
+      bankrollUsd = null;
+    }
+    void notifyWorkerOnline({
+      bankrollUsd,
+      usReady: cfg.provider === "polymarket-us" ? isPolymarketUsReady() : false,
+    }).catch((err) => console.warn("[discord] worker online notify failed", err));
   }
 }

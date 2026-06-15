@@ -10,6 +10,7 @@ import {
   buildBalancedScanWalletList,
   parseDeprioritizedWallets,
 } from "../lib/scan-category-discovery.js";
+import { discoverWalletsFromUsCatalogOverlap } from "../lib/discover-us-catalog-leaders.js";
 import {
   polymarketScanFetch,
   type ScanTraderBadge,
@@ -156,10 +157,27 @@ async function collectLeaderWallets(): Promise<string[]> {
   const whales = await polymarketScanFetch<ScanWhaleRow[]>("whales", { limit: WHALE_LIMIT });
   await storeRawPayload("polymarket-scan", `whales?limit=${WHALE_LIMIT}`, whales);
 
+  let usOverlapWallets: string[] = [];
+  try {
+    const overlap = await discoverWalletsFromUsCatalogOverlap();
+    usOverlapWallets = overlap.map((w) => w.wallet);
+    if (overlap.length > 0) {
+      console.log(
+        `[polymarket-scan] US-catalog overlap wallets=${overlap.length} top=${overlap[0]?.wallet.slice(0, 10)}… conf=${(overlap[0]?.bestConfidence * 100).toFixed(0)}%`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[polymarket-scan] US-catalog overlap discovery failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const list = buildBalancedScanWalletList({
     whales: whales.ok && whales.data ? whales.data : [],
     watchlist: watchlistWallets,
     leaderboard: leaderboardWallets,
+    usOverlapWallets,
     deprioritized,
     maxWallets: WHALE_LIMIT,
   });

@@ -23,6 +23,7 @@ export function buildBalancedScanWalletList(input: {
   whales: ScanWhaleRow[];
   watchlist: string[];
   leaderboard: string[];
+  usOverlapWallets?: string[];
   deprioritized?: Set<string>;
   maxWallets?: number;
 }): string[] {
@@ -40,6 +41,10 @@ export function buildBalancedScanWalletList(input: {
   };
 
   for (const w of input.watchlist) add(w);
+  for (const w of input.usOverlapWallets ?? []) {
+    if (result.length >= maxWallets) break;
+    add(w);
+  }
   for (const w of input.leaderboard) {
     if (result.length >= maxWallets) break;
     add(w);
@@ -132,4 +137,39 @@ export function mergeDeprioritizedWallet(
   };
   base.deprioritizedWallets = map;
   return base;
+}
+
+export function trackUsMatchZeroStreak(
+  meta: Record<string, unknown> | null | undefined,
+  wallet: string,
+): Record<string, unknown> {
+  const base = { ...(meta ?? {}) };
+  const map = { ...((base.usMatchZeroStreaks as Record<string, { count: number; lastAt: string }>) ?? {}) };
+  const w = wallet.toLowerCase();
+  const prev = map[w]?.count ?? 0;
+  map[w] = { count: prev + 1, lastAt: new Date().toISOString() };
+  base.usMatchZeroStreaks = map;
+  return base;
+}
+
+export function clearUsMatchZeroStreak(
+  meta: Record<string, unknown> | null | undefined,
+  wallet: string,
+): Record<string, unknown> {
+  const base = { ...(meta ?? {}) };
+  const map = { ...((base.usMatchZeroStreaks as Record<string, { count: number; lastAt: string }>) ?? {}) };
+  delete map[wallet.toLowerCase()];
+  base.usMatchZeroStreaks = map;
+  return base;
+}
+
+export function shouldDeprioritizeForZeroStreak(
+  meta: Record<string, unknown> | null | undefined,
+  wallet: string,
+): boolean {
+  const minStreak = Number(process.env.COPY_US_ZERO_STREAK_DEPRIORITIZE ?? "3");
+  const raw = meta?.usMatchZeroStreaks;
+  if (!raw || typeof raw !== "object") return false;
+  const row = (raw as Record<string, { count?: number }>)[wallet.toLowerCase()];
+  return (row?.count ?? 0) >= minStreak;
 }

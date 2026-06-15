@@ -15,7 +15,26 @@ import { buildScanTraderCategoryProfile } from "./scan-trader-category-profile.j
 import {
   mergeDeprioritizedWallet,
   parseDeprioritizedWallets,
+  trackUsMatchZeroStreak,
+  clearUsMatchZeroStreak,
+  shouldDeprioritizeForZeroStreak,
 } from "./scan-category-discovery.js";
+
+export interface CopyControlsRefreshResult {
+  evaluated: number;
+  copyEnabled: number;
+  topFails: Array<{ reason: string; count: number }>;
+  leadersByCategory: Record<string, number>;
+  sampledWallets: number;
+  usEvaluated: number;
+  skippedZeroUsOverlap: number;
+  bestMatchedMarkets: Array<{
+    wallet: string;
+    globalTitle: string;
+    usTitle: string;
+    confidence: number;
+  }>;
+}
 
 export function copyCandidatePoolSize(): number {
   const raw =
@@ -38,10 +57,10 @@ export function copyMinLeaders(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
 }
 
-function usGateRefreshLimit(): number {
-  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? "25";
+function usGateRefreshLimit(pool: number): number {
+  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? String(pool);
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 25;
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), pool) : pool;
 }
 
 function categoryProfileBatch(): number {
@@ -100,16 +119,12 @@ async function persistCategoryMetrics(
 }
 
 /** Keep CopyTraderControl in sync with v1 scoring gates. */
-export async function refreshCopyTraderControls(): Promise<{
-  evaluated: number;
-  copyEnabled: number;
-  topFails: Array<{ reason: string; count: number }>;
-}> {
+export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshResult> {
   const pool = Math.min(refreshEvaluateBatch(), copyCandidatePoolSize());
-  const gateLimit = usGateRefreshLimit();
+  const gateLimit = usGateRefreshLimit(pool);
   const profileLimit = Math.min(categoryProfileBatch(), gateLimit);
   console.log(
-    `[worker] copy trader controls start pool=${pool} usGate=${gateLimit} profileBatch=${profileLimit}`,
+    `[worker] copy trader controls start pool=${pool} usGate=ALL(${gateLimit}) profileBatch=${profileLimit}`,
   );
 
   const traders = await prisma.trader.findMany({
@@ -125,14 +140,28 @@ export async function refreshCopyTraderControls(): Promise<{
   });
   const priorEnabled = new Map(priorControls.map((p) => [p.traderId, p.enabled]));
 
-  const profileTraderIds = new Set(traders.slice(0, profileLimit).map((t) => t.id));
-  const gateTraderIds = new Set(traders.slice(0, gateLimit).map((t) => t.id));
+  const profileTraderIds = new Set(
+    traders
+      .slice(0, profileLimit)
+      .map((t) => t.id),
+  );
 
   let copyEnabled = 0;
   const promoted: string[] = [];
   const cooled: string[] = [];
   const failReasons = new Map<string, number>();
   const deprioritize: Array<{ wallet: string; reason: string }> = [];
+  const leadersByCategory: Record<string, number> = {};
+  const bestMatchedMarkets: CopyControlsRefreshResult["bestMatchedMarkets"] = [];
+  let usEvaluated = 0;
+  let skippedZeroUsOverlap = 0;
+
+  let cursorMeta = (
+    await prisma.syncCursor.findUnique({
+      where: { stream: "polymarket-scan:leaderboard" },
+      select: { metadata: true },
+    })
+  )?.metadata as Record<string, unknown> | null;
 
   for (let i = 0; i < traders.length; i++) {
     const t = traders[i];
@@ -141,13 +170,32 @@ export async function refreshCopyTraderControls(): Promise<{
     const legacy = applyRiskToDecision(decideCopyTrader(truth), truth);
 
     let usMatch = 0;
+    let usMatchEvaluated = false;
     let specialistScore = truth.copyabilityScore;
     let categoryNote: string | null = null;
 
-    if (profileTraderIds.has(t.id) && usePolymarketScanIntel()) {
+    const compat = await scoreTraderUsLiveCompat(t.id, t.address, {
+      catalogOnly: true,
+      allowScanFetch: true,
+    });
+    usMatch = compat.bestConfidence;
+    usMatchEvaluated = true;
+    usEvaluated++;
+
+    if (usMatch <= 0) {
+      skippedZeroUsOverlap++;
+      cursorMeta = trackUsMatchZeroStreak(cursorMeta, t.address);
+      if (shouldDeprioritizeForZeroStreak(cursorMeta, t.address)) {
+        deprioritize.push({ wallet: t.address, reason: "repeated US match 0%" });
+      }
+    } else {
+      cursorMeta = clearUsMatchZeroStreak(cursorMeta, t.address);
+    }
+
+    if (profileTraderIds.has(t.id) && usePolymarketScanIntel() && usMatch >= 0.5) {
       try {
         const profile = await buildScanTraderCategoryProfile(t.address);
-        usMatch = profile.bestUsMatch;
+        usMatch = Math.max(usMatch, profile.bestUsMatch);
         specialistScore = profile.activeSpecialistScore;
         categoryNote = profile.bestUsBucket
           ? `${profile.bestUsBucket} US ${(profile.bestUsMatch * 100).toFixed(0)}%`
@@ -161,27 +209,37 @@ export async function refreshCopyTraderControls(): Promise<{
             reason: `low US overlap (${(profile.usOverlapRatio * 100).toFixed(0)}%)`,
           });
         }
+        if (profile.bestUsMatch >= 0.9 && profile.hasTradeableUs) {
+          const topBucket = profile.buckets.find((b) => b.bestUsMatch >= 0.9);
+          if (topBucket) {
+            bestMatchedMarkets.push({
+              wallet: t.address,
+              globalTitle: `${topBucket.bucket} open positions`,
+              usTitle: `${topBucket.bucket} US ${(topBucket.bestUsMatch * 100).toFixed(0)}%`,
+              confidence: topBucket.bestUsMatch,
+            });
+          }
+        }
       } catch (err) {
         console.warn(
           `[worker] category profile failed ${t.address.slice(0, 10)}…`,
           err instanceof Error ? err.message : err,
         );
       }
-    } else if (
-      (usLeaderCompatRequired() || usePolymarketScanIntel()) &&
-      gateTraderIds.has(t.id)
-    ) {
-      const compat = await scoreTraderUsLiveCompat(t.id, t.address, {
-        catalogOnly: true,
-        allowScanFetch: true,
-      });
-      usMatch = compat.bestConfidence;
     }
 
-    const v1 = evaluateCopyV1LeaderGate({ truth, usMatchConfidence: usMatch, specialistScore });
+    const v1 = evaluateCopyV1LeaderGate({
+      truth,
+      usMatchConfidence: usMatch,
+      usMatchEvaluated,
+      specialistScore,
+    });
     const enabled = v1.pass && legacy.recommendation !== "AVOID";
-    if (enabled) copyEnabled++;
-    else if (v1.reasons[0]) {
+    if (enabled) {
+      copyEnabled++;
+      const cat = t.bestCategory ?? categoryNote?.split(" ")[0] ?? "Other";
+      leadersByCategory[cat] = (leadersByCategory[cat] ?? 0) + 1;
+    } else if (v1.reasons[0]) {
       const key = v1.reasons[0].split(" < ")[0] ?? v1.reasons[0];
       failReasons.set(key, (failReasons.get(key) ?? 0) + 1);
     }
@@ -229,24 +287,22 @@ export async function refreshCopyTraderControls(): Promise<{
     }
   }
 
-  if (deprioritize.length > 0) {
-    const cursor = await prisma.syncCursor.findUnique({
-      where: { stream: "polymarket-scan:leaderboard" },
-      select: { metadata: true },
-    });
-    let meta = (cursor?.metadata as Record<string, unknown> | null) ?? {};
-    for (const row of deprioritize) {
-      meta = mergeDeprioritizedWallet(meta, row.wallet, row.reason);
-    }
-    await prisma.syncCursor.update({
-      where: { stream: "polymarket-scan:leaderboard" },
-      data: { metadata: meta as object },
-    });
-    console.log(`[worker] deprioritized ${deprioritize.length} low-US-overlap scan wallet(s)`);
-  }
-
   if (promoted.length > 0 || cooled.length > 0) {
     await notifyBrainLeaderChange({ promoted, cooled, copyEnabled });
+  }
+
+  for (const row of deprioritize) {
+    cursorMeta = mergeDeprioritizedWallet(cursorMeta, row.wallet, row.reason);
+  }
+
+  if (deprioritize.length > 0 || cursorMeta) {
+    await prisma.syncCursor.update({
+      where: { stream: "polymarket-scan:leaderboard" },
+      data: { metadata: (cursorMeta ?? {}) as object },
+    });
+    if (deprioritize.length > 0) {
+      console.log(`[worker] deprioritized ${deprioritize.length} low-US-overlap scan wallet(s)`);
+    }
   }
 
   const topFails = [...failReasons.entries()]
@@ -264,7 +320,18 @@ export async function refreshCopyTraderControls(): Promise<{
     );
   }
 
-  return { evaluated: traders.length, copyEnabled, topFails };
+  return {
+    evaluated: traders.length,
+    copyEnabled,
+    topFails,
+    leadersByCategory,
+    sampledWallets: traders.length,
+    usEvaluated,
+    skippedZeroUsOverlap,
+    bestMatchedMarkets: bestMatchedMarkets
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 8),
+  };
 }
 
 function leaderCategoryBucket(

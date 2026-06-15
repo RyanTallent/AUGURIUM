@@ -42,6 +42,7 @@ export interface CopyV1GateResult {
 export function evaluateCopyV1LeaderGate(input: {
   truth: TraderTruthMetrics;
   usMatchConfidence?: number;
+  usMatchEvaluated?: boolean;
   recentDrawdown?: number;
   specialistScore?: number;
 }): CopyV1GateResult {
@@ -55,7 +56,9 @@ export function evaluateCopyV1LeaderGate(input: {
   const reasons: string[] = [];
   const t = getCopyV1Thresholds();
 
-  if ((input.usMatchConfidence ?? 0) < t.minUsMatch) {
+  if (input.usMatchEvaluated === false) {
+    reasons.push("US compat not evaluated");
+  } else if ((input.usMatchConfidence ?? 0) < t.minUsMatch) {
     reasons.push(`US match ${((input.usMatchConfidence ?? 0) * 100).toFixed(0)}% < ${t.minUsMatch * 100}%`);
   }
   if (input.truth.tradeCount < t.minTradeCount) {

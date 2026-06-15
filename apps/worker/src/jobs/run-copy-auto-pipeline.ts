@@ -15,6 +15,12 @@ import { runCopyLiveJob } from "./run-copy-live.js";
 import { runPortfolioHealthReportJob } from "./run-portfolio-health-report.js";
 import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
 import { refreshCopyTraderControls } from "../lib/refresh-copy-trader-controls.js";
+import { recordCopyEnabledStreak } from "../lib/copy-funnel-state.js";
+import {
+  notifyScanComplete,
+  notifyFunnelWarning,
+  notifyNoEligibleLeaders,
+} from "../lib/live-copy-ops-discord.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
 const INCLUDE_WALLET_ACTIVITY =
@@ -213,6 +219,16 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
     const message = `auto copy: trades=${tradesIngested} scanWallets=${walletsDiscovered} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
 
+    const noTradeReason =
+      mirrorsSubmitted === 0
+        ? (live as { noTradeReason?: string | null }).noTradeReason ??
+          (controls.copyEnabled === 0
+            ? `No COPY leaders enabled — dominant blocker: ${controls.topFails[0]?.reason ?? "unknown"}`
+            : `No source positions passed US entry gates (sourcePositions=${(live as { sourcePositionCount?: number }).sourcePositionCount ?? 0})`)
+        : null;
+
+    const funnelStreak = recordCopyEnabledStreak(controls.copyEnabled);
+
     await prisma.ingestionRun.update({
       where: { id: run.id },
       data: {
@@ -235,6 +251,13 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
           mirrorsSubmitted,
           copyEnabled: controls.copyEnabled,
           topFails: controls.topFails,
+          leadersByCategory: controls.leadersByCategory,
+          sampledWallets: controls.sampledWallets,
+          usEvaluated: controls.usEvaluated,
+          skippedZeroUsOverlap: controls.skippedZeroUsOverlap,
+          bestMatchedMarkets: controls.bestMatchedMarkets,
+          sourcePositionCount: (live as { sourcePositionCount?: number }).sourcePositionCount ?? 0,
+          noTradeReason,
           bankrollUsd: live.bankrollUsd,
           availableUsd: live.availableUsd,
           deployedUsd: live.deployedUsd,
@@ -246,6 +269,34 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     });
 
     console.log(`[worker] copy:auto-pipeline finished ${message}`);
+
+    void notifyScanComplete({
+      runId: run.id,
+      walletsScanned: controls.sampledWallets,
+      copyEnabled: controls.copyEnabled,
+      leadersByCategory: controls.leadersByCategory,
+      submitted: mirrorsSubmitted,
+      topFails: controls.topFails,
+      sourcePositions: (live as { sourcePositionCount?: number }).sourcePositionCount ?? 0,
+      noTradeReason,
+    }).catch((err) => console.warn("[discord] scan complete notify failed", err));
+
+    if (funnelStreak.shouldWarn) {
+      void notifyFunnelWarning({
+        streak: funnelStreak.streak,
+        topFails: controls.topFails,
+        nextAction:
+          "Rotating category-balanced wallets, US-catalog overlap discovery, and deprioritizing repeated 0% US-match whales.",
+      }).catch((err) => console.warn("[discord] funnel warning failed", err));
+    }
+
+    if (controls.copyEnabled === 0) {
+      void notifyNoEligibleLeaders({
+        copyEnabled: controls.copyEnabled,
+        usEvaluated: controls.usEvaluated,
+        skippedZeroUsOverlap: controls.skippedZeroUsOverlap,
+      }).catch((err) => console.warn("[discord] no-leaders notify failed", err));
+    }
 
     return {
       enabled: true,
