@@ -9,6 +9,7 @@ import {
   WORKER_QUEUES,
 } from "./lib/queue-scheduler.js";
 import { QUEUES, isUsBroadIntelMode, getUsCompatMinConfidence } from "@augurium/shared";
+import { maybeAutoSeedDefaultWatchlist } from "@augurium/copy-trading";
 import { runQueueJob } from "./lib/run-queue-job.js";
 import {
   markOrphanedCopyAutoPipelineRuns,
@@ -158,6 +159,9 @@ async function bootstrap(): Promise<void> {
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
   await ensureLiveCopyDiscordOnStartup();
+  void maybeAutoSeedDefaultWatchlist().catch((err) =>
+    console.warn("[worker] watchlist auto-seed error", err instanceof Error ? err.message : err),
+  );
 
   if (COPY_PIPELINE_ENABLED) {
     console.log("[worker] running copy:auto-pipeline first (live trading priority)");

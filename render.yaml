@@ -187,6 +187,10 @@ services:
           property: connectionString
       - key: AUGURIUM_DASHBOARD_URL
         sync: false
+      - key: COPY_ADMIN_TOKEN
+        sync: false
+      - key: MAINTENANCE_ADMIN_TOKEN
+        sync: false
 
   - type: worker
     name: augurium-worker

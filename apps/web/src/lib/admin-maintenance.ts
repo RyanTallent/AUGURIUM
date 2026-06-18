@@ -21,6 +21,26 @@ export function verifyMaintenanceAdminToken(request: Request): boolean {
   return bearer === expected || alt === expected;
 }
 
+export function getCopyAdminConfig(): { tokenConfigured: boolean } {
+  const copy = (process.env.COPY_ADMIN_TOKEN ?? "").trim();
+  const maintenance = (process.env.MAINTENANCE_ADMIN_TOKEN ?? "").trim();
+  return { tokenConfigured: copy.length > 0 || maintenance.length > 0 };
+}
+
+export function verifyCopyAdminToken(request: Request): boolean {
+  const copy = (process.env.COPY_ADMIN_TOKEN ?? "").trim();
+  const maintenance = (process.env.MAINTENANCE_ADMIN_TOKEN ?? "").trim();
+  if (!copy && !maintenance) return false;
+
+  const header = request.headers.get("authorization") ?? "";
+  const bearer = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  const alt = request.headers.get("x-copy-admin-token") ?? "";
+  const token = bearer || alt;
+  if (!token) return false;
+
+  return (copy.length > 0 && token === copy) || (maintenance.length > 0 && token === maintenance);
+}
+
 export async function hasActiveMaintenanceRun(): Promise<boolean> {
   const active = await prisma.ingestionRun.findFirst({
     where: {

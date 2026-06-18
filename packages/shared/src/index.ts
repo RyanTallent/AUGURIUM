@@ -149,3 +149,11 @@ export {
   formatSpecialtyBucketLabel,
   type SpecialtyBucket,
 } from "./us-market-categories.js";
+export {
+  polymarketScanFetch,
+  type PolymarketScanResponse,
+  type ScanWhaleRow,
+  type ScanWalletTrade,
+  type ScanWalletPnlSummary,
+  type ScanTraderBadge,
+} from "./polymarket-scan.js";

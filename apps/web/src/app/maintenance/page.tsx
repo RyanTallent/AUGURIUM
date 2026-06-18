@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getLastMaintenanceRun } from "@augurium/database";
 import { SnapshotNotice } from "../../components/SnapshotNotice";
+import { WatchlistSeedForm } from "../../components/WatchlistSeedForm";
 import {
   loadMaintenanceDiagnostics,
   loadMaintenancePageData,
@@ -193,6 +194,35 @@ export default async function MaintenancePage() {
         }}
       >
         {`curl -X POST $AUGURIUM_DASHBOARD_URL/api/admin/maintenance/run \\\n  -H "Authorization: Bearer $MAINTENANCE_ADMIN_TOKEN"`}
+      </pre>
+
+      <WatchlistSeedForm />
+
+      <h2 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Watchlist seed API</h2>
+      <p style={{ fontSize: "0.9rem" }}>
+        Token on this host:{" "}
+        <strong
+          className={
+            process.env.COPY_ADMIN_TOKEN?.trim() || process.env.MAINTENANCE_ADMIN_TOKEN?.trim()
+              ? styles.ok
+              : styles.warn
+          }
+        >
+          {process.env.COPY_ADMIN_TOKEN?.trim() || process.env.MAINTENANCE_ADMIN_TOKEN?.trim()
+            ? "configured"
+            : "not set"}
+        </strong>
+      </p>
+      <pre
+        style={{
+          background: "var(--surface)",
+          padding: "1rem",
+          borderRadius: "6px",
+          fontSize: "0.8rem",
+          overflow: "auto",
+        }}
+      >
+        {`curl -X POST $AUGURIUM_DASHBOARD_URL/api/admin/copy/watchlist \\\n  -H "Authorization: Bearer $COPY_ADMIN_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"wallet":"0x89dd49bf87c41be422927372a0b75c6ab577f662","notes":"sports-mlb"}'`}
       </pre>
 
       {lastRun && lastRun.steps.length > 0 && (

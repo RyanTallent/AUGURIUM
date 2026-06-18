@@ -8,12 +8,9 @@
  *   politics|sports|economics
  */
 import { prisma } from "@augurium/database";
-import { ingestWatchlistWalletFromScan } from "../lib/seed-watchlist-ingest.js";
-import { syncPositionsFromPolymarketScanForTrader } from "../jobs/sync-positions-polymarket-scan.js";
+import { seedUsLeaderWatchlistWallet } from "@augurium/copy-trading";
 
 const DEFAULT_SEEDS: Array<{ wallet: string; notes: string }> = [
-  // Keep existing promoted leader if known — replace with full address from DB/brain channel.
-  // { wallet: "0xa8b9...", notes: "politics — existing COPY leader (US overlap)" },
   {
     wallet: "",
     notes: "politics — set COPY_SEED_WATCHLIST_WALLETS env with PolymarketScan wallet",
@@ -56,27 +53,16 @@ async function main(): Promise<void> {
   }
 
   for (const seed of seeds) {
-    const row = await prisma.usLeaderWatchlist.upsert({
-      where: { wallet: seed.wallet },
-      create: { wallet: seed.wallet, enabled: true, notes: seed.notes },
-      update: { enabled: true, notes: seed.notes },
-    });
-    console.log(`[seed] watchlist ${row.wallet.slice(0, 10)}… — ${row.notes ?? "no notes"}`);
-
-    const traderId = await ingestWatchlistWalletFromScan(seed.wallet);
-    const trader = await prisma.trader.findUnique({
-      where: { id: traderId },
-      select: { address: true, trades: true, winRate: true, roi: true },
+    const result = await seedUsLeaderWatchlistWallet({
+      wallet: seed.wallet,
+      notes: seed.notes,
     });
     console.log(
-      `[seed] scan metrics trader=${trader?.address.slice(0, 10)}… trades=${trader?.trades} wr=${((trader?.winRate ?? 0) * 100).toFixed(0)}% roi=${((trader?.roi ?? 0) * 100).toFixed(1)}%`,
+      `[seed] watchlist ${result.wallet.slice(0, 10)}… metrics=${result.metricsFound} synced=${result.positionsSynced} usMatch=${(result.usMatchConfidence * 100).toFixed(0)}% gates=${result.leaderGatesPass ? "pass" : "fail"}`,
     );
-
-    const synced = await syncPositionsFromPolymarketScanForTrader({
-      id: traderId,
-      address: seed.wallet,
-    });
-    console.log(`[seed] position sync synced=${synced} for ${seed.wallet.slice(0, 10)}…`);
+    if (result.gateReasons.length > 0) {
+      console.log(`[seed] gate reasons: ${result.gateReasons.join("; ")}`);
+    }
   }
 
   const total = await prisma.usLeaderWatchlist.count({ where: { enabled: true } });

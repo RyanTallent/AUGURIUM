@@ -17,3 +17,4 @@ export * from "./rising-wallets.js";
 export * from "./scoring-v1.js";
 export * from "./copy-v1-gates.js";
 export * from "./category-specialty.js";
+export * from "./watchlist-seed.js";
