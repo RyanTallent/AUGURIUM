@@ -204,7 +204,10 @@ export async function syncPositionsFromPolymarketScanForTrader(trader: {
 }
 
 /** Sync open leader positions from PolymarketScan wallet_trades for COPY-enabled traders. */
-export async function syncPositionsFromPolymarketScan(): Promise<number> {
+export async function syncPositionsFromPolymarketScan(opts?: {
+  fastOnly?: boolean;
+}): Promise<number> {
+  const fastOnly = opts?.fastOnly === true;
   const controls = await prisma.copyTraderControl.findMany({
     where: { enabled: true },
     orderBy: { evaluatedAt: "desc" },
@@ -212,19 +215,21 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
     include: { trader: true },
   });
 
-  const scanLeaders = await prisma.trader.findMany({
-    where: { discoveredVia: "polymarket-scan", lastScoredAt: { not: null } },
-    orderBy: { rankingScore: "desc" },
-    take: SYNC_BATCH,
-    select: { id: true, address: true },
-  });
-
   const traderById = new Map<string, { id: string; address: string }>();
   for (const c of controls) {
     traderById.set(c.trader.id, c.trader);
   }
-  for (const t of scanLeaders) {
-    traderById.set(t.id, t);
+
+  if (!fastOnly) {
+    const scanLeaders = await prisma.trader.findMany({
+      where: { discoveredVia: "polymarket-scan", lastScoredAt: { not: null } },
+      orderBy: { rankingScore: "desc" },
+      take: SYNC_BATCH,
+      select: { id: true, address: true },
+    });
+    for (const t of scanLeaders) {
+      traderById.set(t.id, t);
+    }
   }
 
   const watchlist = await prisma.usLeaderWatchlist.findMany({
@@ -233,7 +238,7 @@ export async function syncPositionsFromPolymarketScan(): Promise<number> {
   });
 
   console.log(
-    `[position-sync:scan] batch leaders=${traderById.size} watchlist=${watchlist.length} maxOpen=${MAX_OPEN_POSITIONS}`,
+    `[position-sync:scan] mode=${fastOnly ? "fast" : "slow"} leaders=${traderById.size} watchlist=${watchlist.length} maxOpen=${MAX_OPEN_POSITIONS}`,
   );
 
   let synced = 0;

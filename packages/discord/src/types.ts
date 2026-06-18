@@ -33,6 +33,7 @@ export type DiscordEventType =
   | "WORKER_ONLINE"
   | "SCAN_COMPLETE"
   | "FUNNEL_WARNING"
+  | "DB_PRESSURE_WARNING"
   | "COPY_WEEKLY_STOP"
   | "RISK_ALERT"
   | "BRAIN_UPDATE"

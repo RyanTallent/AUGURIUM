@@ -54,6 +54,7 @@ export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
         { dedupeKey: { startsWith: "brain:" } },
         { dedupeKey: { startsWith: "journal:" } },
         { dedupeKey: { startsWith: "copy:weekly-stop:" } },
+        { dedupeKey: { startsWith: "ops:" } },
         {
           eventType: {
             in: [
@@ -62,6 +63,10 @@ export async function dispatchLiveCopyDiscordEvents(): Promise<number> {
               "COPY_WEEKLY_STOP",
               "BRAIN_UPDATE",
               "JOURNAL_ENTRY",
+              "WORKER_ONLINE",
+              "SCAN_COMPLETE",
+              "FUNNEL_WARNING",
+              "DB_PRESSURE_WARNING",
             ],
           },
         },

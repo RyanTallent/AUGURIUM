@@ -188,6 +188,7 @@ export async function GET() {
             bankrollSource: pipelineMeta?.bankrollSource ?? null,
             usOpenPositions: pipelineMeta?.usOpenPositions ?? null,
             lite: pipelineMeta?.lite ?? null,
+            cycleMode: pipelineMeta?.cycleMode ?? null,
           }
         : null,
     });

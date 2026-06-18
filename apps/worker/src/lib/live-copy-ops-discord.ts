@@ -1,10 +1,5 @@
 import { prisma } from "@augurium/database";
-import {
-  buildBrainUpdateEmbed,
-  buildPortfolioEmbed,
-  buildRiskAlertEmbed,
-  getDiscordConfig,
-} from "@augurium/discord";
+import { buildBrainUpdateEmbed, buildPortfolioEmbed, buildRiskAlertEmbed, getDiscordConfig } from "@augurium/discord";
 import { getQueueIntervalMs } from "./queue-scheduler.js";
 import { QUEUES } from "@augurium/shared";
 import { queueDiscordEvent } from "./discord-events.js";
@@ -121,25 +116,53 @@ export async function notifyFunnelWarning(input: {
   streak: number;
   topFails: Array<{ reason: string; count: number }>;
   nextAction: string;
+  variant?: "no-leaders" | "no-positions";
+  copyEnabled?: number;
+  sourcePositions?: number;
 }): Promise<void> {
   const hourKey = new Date().toISOString().slice(0, 13);
   const failsLine = input.topFails
     .slice(0, 3)
     .map((f) => `${f.count}× ${f.reason}`)
     .join(" | ");
+  const variant = input.variant ?? "no-leaders";
+  const message =
+    variant === "no-positions"
+      ? `copyEnabled=${input.copyEnabled ?? "?"} but sourcePositions=0 for ${input.streak} consecutive cycles.`
+      : `copyEnabled=0 for ${input.streak} consecutive pipeline cycles.`;
 
   await sendOpsEvent({
     eventType: "FUNNEL_WARNING",
-    dedupeKey: `ops:funnel-warn:${hourKey}`,
+    dedupeKey: `ops:funnel-warn:${variant}:${hourKey}`,
     title: "FUNNEL WARNING",
     payload: buildBrainUpdateEmbed({
       title: "FUNNEL WARNING",
-      message: `copyEnabled=0 for ${input.streak} consecutive pipeline cycles.`,
+      message,
       fields: [
-        { name: "Dominant blocker", value: failsLine || "unknown" },
+        { name: "Dominant blocker", value: failsLine || "no US-tradeable leader positions" },
         { name: "Next action", value: input.nextAction },
       ],
       dashboardUrl: `${getDiscordConfig(process.env).dashboardBaseUrl}/api/copy/live-status`,
+    }),
+  });
+}
+
+export async function notifyDbPressureWarning(input: {
+  runId?: string;
+  step?: string;
+  message: string;
+}): Promise<void> {
+  const hourKey = new Date().toISOString().slice(0, 13);
+  await sendOpsEvent({
+    eventType: "DB_PRESSURE_WARNING",
+    dedupeKey: `ops:db-pressure:${hourKey}`,
+    title: "DB PRESSURE WARNING",
+    payload: buildRiskAlertEmbed({
+      title: "DB PRESSURE WARNING",
+      message: input.step
+        ? `${input.step}: ${input.message}`
+        : input.message,
+      source: "copy:auto-pipeline",
     }),
   });
 }

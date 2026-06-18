@@ -15,12 +15,19 @@ import { runCopyLiveJob } from "./run-copy-live.js";
 import { runPortfolioHealthReportJob } from "./run-portfolio-health-report.js";
 import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
 import { refreshCopyTraderControls } from "../lib/refresh-copy-trader-controls.js";
-import { recordCopyEnabledStreak } from "../lib/copy-funnel-state.js";
+import { recordCopyEnabledStreak, recordNoTradeableStreak } from "../lib/copy-funnel-state.js";
 import {
   notifyScanComplete,
   notifyFunnelWarning,
   notifyNoEligibleLeaders,
+  notifyDbPressureWarning,
 } from "../lib/live-copy-ops-discord.js";
+import {
+  resolvePipelineCycleMode,
+  markSlowDiscoveryCompleted,
+  slowDiscoveryIntervalMs,
+} from "../lib/copy-pipeline-rhythm.js";
+import { isDbPressureError } from "../lib/db-pressure.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
 const INCLUDE_WALLET_ACTIVITY =
@@ -30,6 +37,7 @@ const PAPER_COPY_ENABLED = process.env.PAPER_COPY_ENABLED === "true";
 export interface CopyAutoPipelineSummary {
   enabled: boolean;
   durationMs: number;
+  cycleMode?: "fast" | "slow";
   tradesIngested: number;
   walletsDiscovered: number;
   walletActivityIngested: number;
@@ -67,6 +75,12 @@ async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
       `[worker] copy:auto-pipeline step ${name} failed ms=${Date.now() - started}`,
       err,
     );
+    if (isDbPressureError(err)) {
+      void notifyDbPressureWarning({
+        step: name,
+        message: err instanceof Error ? err.message : String(err),
+      }).catch((e) => console.warn("[discord] db pressure notify failed", e));
+    }
     throw err;
   }
 }
@@ -99,12 +113,15 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
   const usMode = scanIntel || isUsOnlyLiveCopyMode();
   const broadIntel = usMode && isUsBroadIntelMode();
   const lite = useLiteLivePath() && !broadIntel;
+  const usLite = usMode && !broadIntel;
+  const cycleMode = usLite ? await resolvePipelineCycleMode() : "slow";
+  const isSlowCycle = cycleMode === "slow";
   const run = await prisma.ingestionRun.create({
     data: { source: "copy:auto-pipeline", status: "running" },
   });
 
   console.log(
-    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode} broadIntel=${broadIntel}`,
+    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode} broadIntel=${broadIntel} cycle=${cycleMode} slowMs=${slowDiscoveryIntervalMs()}`,
   );
 
   let tradesIngested = 0;
@@ -121,8 +138,12 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
   try {
     if (usMode) {
-      walletsDiscovered = await pipelineStep("polymarket_scan_leaders", ingestPolymarketScanLeaders);
-      await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
+      if (isSlowCycle) {
+        walletsDiscovered = await pipelineStep("polymarket_scan_leaders", ingestPolymarketScanLeaders);
+        await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
+      } else {
+        console.log("[worker] copy:auto-pipeline fast cycle — skip scan ingest + US catalog refresh");
+      }
       if (broadIntel) {
         if (INCLUDE_WALLET_DISCOVER) {
           walletsDiscovered += await pipelineStep("wallet_discover", discoverWalletsFromHolders);
@@ -133,8 +154,10 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
             ingestWalletActivityForCopyTargets,
           );
         }
+      } else if (!isSlowCycle) {
+        console.log("[worker] copy:auto-pipeline US fast — skip global trade ingest and wallet discover");
       } else {
-        console.log("[worker] copy:auto-pipeline US mode — skip global trade ingest and wallet discover");
+        console.log("[worker] copy:auto-pipeline US slow — skip global trade ingest and wallet discover");
       }
     } else if (!lite) {
       tradesIngested = await pipelineStep("trade_ingest", ingestGlobalTrades);
@@ -163,10 +186,14 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     }
 
     if (usMode && !broadIntel) {
-      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
+      positionsSynced = await pipelineStep("position_sync_scan", () =>
+        syncPositionsFromPolymarketScan({ fastOnly: !isSlowCycle }),
+      );
     }
 
-    const controls = await pipelineStep("copy_trader_controls", refreshCopyTraderControls);
+    const controls = await pipelineStep("copy_trader_controls", () =>
+      refreshCopyTraderControls({ mode: usLite ? cycleMode : "slow" }),
+    );
     console.log(
       `[worker] copy:auto-pipeline copyTraderControl evaluated=${controls.evaluated} enabled=${controls.copyEnabled}`,
     );
@@ -217,7 +244,11 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
     await pipelineStep("portfolio_health", runPortfolioHealthReportJob);
 
-    const message = `auto copy: trades=${tradesIngested} scanWallets=${walletsDiscovered} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
+    if (usLite && isSlowCycle) {
+      await markSlowDiscoveryCompleted();
+    }
+
+    const message = `auto copy: cycle=${cycleMode} trades=${tradesIngested} scanWallets=${walletsDiscovered} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
 
     const noTradeReason =
       mirrorsSubmitted === 0
@@ -228,6 +259,9 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         : null;
 
     const funnelStreak = recordCopyEnabledStreak(controls.copyEnabled);
+    const sourcePositionCount =
+      (live as { sourcePositionCount?: number }).sourcePositionCount ?? 0;
+    const noTradeableStreak = recordNoTradeableStreak(controls.copyEnabled, sourcePositionCount);
 
     await prisma.ingestionRun.update({
       where: { id: run.id },
@@ -236,6 +270,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         finishedAt: new Date(),
         itemCount: tradersScored + paperOpened + mirrorsSubmitted,
         metadata: {
+          cycleMode,
           usMode,
           lite,
           tradesIngested,
@@ -256,7 +291,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
           usEvaluated: controls.usEvaluated,
           skippedZeroUsOverlap: controls.skippedZeroUsOverlap,
           bestMatchedMarkets: controls.bestMatchedMarkets,
-          sourcePositionCount: (live as { sourcePositionCount?: number }).sourcePositionCount ?? 0,
+          sourcePositionCount,
           noTradeReason,
           bankrollUsd: live.bankrollUsd,
           availableUsd: live.availableUsd,
@@ -277,7 +312,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       leadersByCategory: controls.leadersByCategory,
       submitted: mirrorsSubmitted,
       topFails: controls.topFails,
-      sourcePositions: (live as { sourcePositionCount?: number }).sourcePositionCount ?? 0,
+      sourcePositions: sourcePositionCount,
       noTradeReason,
     }).catch((err) => console.warn("[discord] scan complete notify failed", err));
 
@@ -285,9 +320,22 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
       void notifyFunnelWarning({
         streak: funnelStreak.streak,
         topFails: controls.topFails,
+        variant: "no-leaders",
         nextAction:
-          "Rotating category-balanced wallets, US-catalog overlap discovery, and deprioritizing repeated 0% US-match whales.",
+          "Slow-cycle category discovery, US-catalog overlap search, and watchlist seeding for politics/sports/econ wallets.",
       }).catch((err) => console.warn("[discord] funnel warning failed", err));
+    }
+
+    if (noTradeableStreak.shouldWarn) {
+      void notifyFunnelWarning({
+        streak: noTradeableStreak.streak,
+        topFails: controls.topFails,
+        variant: "no-positions",
+        copyEnabled: controls.copyEnabled,
+        sourcePositions: sourcePositionCount,
+        nextAction:
+          "Enabled leaders lack US-catalog open positions — position sync + watchlist overlap wallets; waiting for valid ≥90% match.",
+      }).catch((err) => console.warn("[discord] no-positions funnel warning failed", err));
     }
 
     if (controls.copyEnabled === 0) {
@@ -301,6 +349,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     return {
       enabled: true,
       durationMs: Date.now() - started,
+      cycleMode,
       tradesIngested,
       walletsDiscovered,
       walletActivityIngested,
@@ -316,6 +365,11 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isDbPressureError(err)) {
+      void notifyDbPressureWarning({ runId: run.id, message }).catch((e) =>
+        console.warn("[discord] db pressure notify failed", e),
+      );
+    }
     await notifyLiveCopyProblem({
       key: `pipeline:${run.id}`,
       message: `copy:auto-pipeline failed: ${message}`,

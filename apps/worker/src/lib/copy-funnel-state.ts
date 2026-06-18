@@ -1,5 +1,6 @@
 /** In-process funnel streak tracking (resets on worker restart). */
 let consecutiveZeroCopyEnabled = 0;
+let consecutiveNoTradeablePositions = 0;
 
 export function recordCopyEnabledStreak(copyEnabled: number): {
   streak: number;
@@ -13,6 +14,22 @@ export function recordCopyEnabledStreak(copyEnabled: number): {
   return {
     streak: consecutiveZeroCopyEnabled,
     shouldWarn: consecutiveZeroCopyEnabled >= 3,
+  };
+}
+
+/** Leaders enabled but no US-tradeable source positions surfaced. */
+export function recordNoTradeableStreak(
+  copyEnabled: number,
+  sourcePositions: number,
+): { streak: number; shouldWarn: boolean } {
+  if (copyEnabled === 0 || sourcePositions > 0) {
+    consecutiveNoTradeablePositions = 0;
+    return { streak: 0, shouldWarn: false };
+  }
+  consecutiveNoTradeablePositions += 1;
+  return {
+    streak: consecutiveNoTradeablePositions,
+    shouldWarn: consecutiveNoTradeablePositions >= 2,
   };
 }
 

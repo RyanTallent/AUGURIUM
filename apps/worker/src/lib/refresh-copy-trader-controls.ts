@@ -1,4 +1,4 @@
-import { prisma } from "@augurium/database";
+import { prisma, type Trader, type TraderMetricsSnapshot } from "@augurium/database";
 import { usePolymarketScanIntel, formatSpecialtyBucketLabel } from "@augurium/shared";
 import {
   applyRiskToDecision,
@@ -9,7 +9,9 @@ import {
   categoryLeaderPickScore,
   type TraderCategoryProfile,
 } from "@augurium/copy-trading";
-import { scoreTraderUsLiveCompat, usLeaderCompatRequired, maxFullGateLeaders } from "./us-leader-compat.js";
+import { usLeaderCompatRequired, maxFullGateLeaders } from "./us-leader-compat.js";
+import { scoreTraderUsLiveCompatCached } from "./us-compat-cache.js";
+import { loadLastSlowFunnelMeta, saveLastSlowFunnelMeta } from "./copy-pipeline-rhythm.js";
 import { notifyBrainLeaderChange } from "./enqueue-live-copy-discord.js";
 import { buildScanTraderCategoryProfile } from "./scan-trader-category-profile.js";
 import {
@@ -57,11 +59,6 @@ export function copyMinLeaders(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
 }
 
-function usGateRefreshLimit(pool: number): number {
-  const raw = process.env.COPY_US_GATE_REFRESH_LIMIT ?? String(pool);
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), pool) : pool;
-}
 
 function categoryProfileBatch(): number {
   const raw = process.env.COPY_CATEGORY_PROFILE_BATCH ?? "20";
@@ -118,34 +115,104 @@ async function persistCategoryMetrics(
   });
 }
 
-/** Keep CopyTraderControl in sync with v1 scoring gates. */
-export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshResult> {
-  const pool = Math.min(refreshEvaluateBatch(), copyCandidatePoolSize());
-  const gateLimit = usGateRefreshLimit(pool);
-  const profileLimit = Math.min(categoryProfileBatch(), gateLimit);
-  console.log(
-    `[worker] copy trader controls start pool=${pool} usGate=ALL(${gateLimit}) profileBatch=${profileLimit}`,
-  );
+function slowControlsBatch(): number {
+  const raw = process.env.COPY_SLOW_CONTROLS_BATCH ?? "15";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 15;
+}
 
-  const traders = await prisma.trader.findMany({
-    where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
-    orderBy: { rankingScore: "desc" },
-    take: pool,
-    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+function fastControlsMax(): number {
+  const raw = process.env.COPY_FAST_CONTROLS_MAX ?? "12";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 12;
+}
+
+type TraderRow = Pick<
+  Trader,
+  | "id"
+  | "address"
+  | "tier"
+  | "copyabilityScore"
+  | "confidenceScore"
+  | "estimatedCopiedRoi"
+  | "rankingScore"
+  | "winRate"
+  | "roi"
+  | "trades"
+  | "recentFormScore"
+  | "bestCategory"
+  | "lowConfidence"
+  | "lastScoredAt"
+> & {
+  metricsSnapshots: TraderMetricsSnapshot[];
+};
+
+async function loadWatchlistTraders(): Promise<TraderRow[]> {
+  const rows = await prisma.usLeaderWatchlist.findMany({
+    where: { enabled: true },
+    take: 8,
   });
+  const out: TraderRow[] = [];
 
-  const priorControls = await prisma.copyTraderControl.findMany({
-    where: { traderId: { in: traders.map((t) => t.id) } },
-    select: { traderId: true, enabled: true },
-  });
-  const priorEnabled = new Map(priorControls.map((p) => [p.traderId, p.enabled]));
+  for (const w of rows) {
+    let trader = await prisma.trader.findFirst({
+      where: { address: w.wallet.toLowerCase() },
+      include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+    });
+    if (!trader) {
+      trader = await prisma.trader.create({
+        data: {
+          address: w.wallet.toLowerCase(),
+          discoveredVia: "polymarket-scan-watchlist",
+          rankingScore: 50,
+          lastScoredAt: new Date(),
+        },
+        include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+      });
+    }
+    out.push({
+      id: trader.id,
+      address: trader.address,
+      tier: trader.tier,
+      copyabilityScore: trader.copyabilityScore,
+      confidenceScore: trader.confidenceScore,
+      estimatedCopiedRoi: trader.estimatedCopiedRoi,
+      rankingScore: trader.rankingScore,
+      winRate: trader.winRate,
+      roi: trader.roi,
+      trades: trader.trades,
+      recentFormScore: trader.recentFormScore,
+      bestCategory: trader.bestCategory,
+      lowConfidence: trader.lowConfidence,
+      lastScoredAt: trader.lastScoredAt,
+      metricsSnapshots: trader.metricsSnapshots,
+    });
+  }
+  return out;
+}
 
-  const profileTraderIds = new Set(
-    traders
-      .slice(0, profileLimit)
-      .map((t) => t.id),
-  );
-
+async function evaluateTraderControls(
+  traders: TraderRow[],
+  opts: {
+    profileLimit: number;
+    allowScanFetch: boolean;
+    forceCompat: boolean;
+    priorEnabled: Map<string, boolean>;
+    cursorMeta: Record<string, unknown> | null;
+  },
+): Promise<{
+  copyEnabled: number;
+  promoted: string[];
+  cooled: string[];
+  failReasons: Map<string, number>;
+  deprioritize: Array<{ wallet: string; reason: string }>;
+  leadersByCategory: Record<string, number>;
+  bestMatchedMarkets: CopyControlsRefreshResult["bestMatchedMarkets"];
+  usEvaluated: number;
+  skippedZeroUsOverlap: number;
+  cursorMeta: Record<string, unknown> | null;
+}> {
+  const profileTraderIds = new Set(traders.slice(0, opts.profileLimit).map((t) => t.id));
   let copyEnabled = 0;
   const promoted: string[] = [];
   const cooled: string[] = [];
@@ -155,13 +222,7 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
   const bestMatchedMarkets: CopyControlsRefreshResult["bestMatchedMarkets"] = [];
   let usEvaluated = 0;
   let skippedZeroUsOverlap = 0;
-
-  let cursorMeta = (
-    await prisma.syncCursor.findUnique({
-      where: { stream: "polymarket-scan:leaderboard" },
-      select: { metadata: true },
-    })
-  )?.metadata as Record<string, unknown> | null;
+  let cursorMeta = opts.cursorMeta;
 
   for (let i = 0; i < traders.length; i++) {
     const t = traders[i];
@@ -174,9 +235,10 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
     let specialistScore = truth.copyabilityScore;
     let categoryNote: string | null = null;
 
-    const compat = await scoreTraderUsLiveCompat(t.id, t.address, {
+    const compat = await scoreTraderUsLiveCompatCached(t.id, t.address, {
       catalogOnly: true,
-      allowScanFetch: true,
+      allowScanFetch: opts.allowScanFetch,
+      force: opts.forceCompat,
     });
     usMatch = compat.bestConfidence;
     usMatchEvaluated = true;
@@ -244,7 +306,7 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
       failReasons.set(key, (failReasons.get(key) ?? 0) + 1);
     }
 
-    const prior = priorEnabled.get(t.id);
+    const prior = opts.priorEnabled.get(t.id);
     if (prior === false && enabled) promoted.push(t.address);
     if (prior === true && !enabled) cooled.push(t.address);
 
@@ -253,8 +315,7 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
       `v1 L${v1.scores.lifetime.toFixed(0)} H${v1.scores.heat.toFixed(0)} C${v1.scores.conviction.toFixed(0)}`,
     ];
     if (categoryNote) strengths.push(categoryNote);
-    const weaknesses =
-      v1.reasons.length > 0 ? v1.reasons : legacy.weaknesses;
+    const weaknesses = v1.reasons.length > 0 ? v1.reasons : legacy.weaknesses;
 
     await prisma.copyTraderControl.upsert({
       where: { traderId: t.id },
@@ -281,34 +342,207 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
         evaluatedAt: new Date(),
       },
     });
-
-    if (i > 0 && i % 5 === 0) {
-      console.log(`[worker] copy trader controls progress ${i}/${traders.length}`);
-    }
   }
 
-  if (promoted.length > 0 || cooled.length > 0) {
-    await notifyBrainLeaderChange({ promoted, cooled, copyEnabled });
+  return {
+    copyEnabled,
+    promoted,
+    cooled,
+    failReasons,
+    deprioritize,
+    leadersByCategory,
+    bestMatchedMarkets,
+    usEvaluated,
+    skippedZeroUsOverlap,
+    cursorMeta,
+  };
+}
+
+/** Fast path — re-validate enabled leaders + watchlist only (no 50-wallet sweep). */
+async function refreshCopyTraderControlsFast(): Promise<CopyControlsRefreshResult> {
+  const lastSlow = await loadLastSlowFunnelMeta();
+  const max = fastControlsMax();
+  console.log(`[worker] copy trader controls FAST max=${max}`);
+
+  const enabledRows = await prisma.copyTraderControl.findMany({
+    where: { enabled: true },
+    include: {
+      trader: { include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } } },
+    },
+  });
+
+  const watchlistTraders = await loadWatchlistTraders();
+  const traderById = new Map<string, TraderRow>();
+  for (const row of enabledRows) {
+    traderById.set(row.trader.id, row.trader);
+  }
+  for (const w of watchlistTraders) {
+    if (!traderById.has(w.id)) traderById.set(w.id, w);
   }
 
-  for (const row of deprioritize) {
+  const traders = [...traderById.values()].slice(0, max);
+  const priorEnabled = new Map(
+    (await prisma.copyTraderControl.findMany({
+      where: { traderId: { in: traders.map((t) => t.id) } },
+      select: { traderId: true, enabled: true },
+    })).map((p) => [p.traderId, p.enabled]),
+  );
+
+  const cursorMeta = (
+    await prisma.syncCursor.findUnique({
+      where: { stream: "polymarket-scan:leaderboard" },
+      select: { metadata: true },
+    })
+  )?.metadata as Record<string, unknown> | null;
+
+  const result = await evaluateTraderControls(traders, {
+    profileLimit: 0,
+    allowScanFetch: false,
+    forceCompat: false,
+    priorEnabled,
+    cursorMeta,
+  });
+
+  if (result.promoted.length > 0 || result.cooled.length > 0) {
+    await notifyBrainLeaderChange({
+      promoted: result.promoted,
+      cooled: result.cooled,
+      copyEnabled: result.copyEnabled,
+    });
+  }
+
+  const copyEnabled = await prisma.copyTraderControl.count({ where: { enabled: true } });
+  const topFails =
+    (lastSlow?.topFails as Array<{ reason: string; count: number }> | undefined) ?? [];
+
+  console.log(
+    `[worker] copy trader controls FAST evaluated=${traders.length} copyEnabled=${copyEnabled}`,
+  );
+
+  return {
+    evaluated: traders.length,
+    copyEnabled,
+    topFails,
+    leadersByCategory: result.leadersByCategory,
+    sampledWallets: traders.length,
+    usEvaluated: result.usEvaluated,
+    skippedZeroUsOverlap: result.skippedZeroUsOverlap,
+    bestMatchedMarkets:
+      (lastSlow?.bestMatchedMarkets as CopyControlsRefreshResult["bestMatchedMarkets"]) ?? [],
+  };
+}
+
+/** Slow path — rotated discovery batch + category profiling (30–60 min). */
+async function refreshCopyTraderControlsSlow(): Promise<CopyControlsRefreshResult> {
+  const pool = Math.min(refreshEvaluateBatch(), copyCandidatePoolSize());
+  const batch = slowControlsBatch();
+  const profileLimit = Math.min(categoryProfileBatch(), batch);
+  console.log(
+    `[worker] copy trader controls SLOW pool=${pool} batch=${batch} profileBatch=${profileLimit}`,
+  );
+
+  const poolTraders = await prisma.trader.findMany({
+    where: { lastScoredAt: { not: null }, rankingScore: { gt: 0 } },
+    orderBy: { rankingScore: "desc" },
+    take: pool,
+    include: { metricsSnapshots: { orderBy: { capturedAt: "desc" }, take: 1 } },
+  });
+
+  const rotateCursor = await prisma.syncCursor.findUnique({
+    where: { stream: "copy:controls-rotate" },
+    select: { cursorValue: true },
+  });
+  const offset = Number(rotateCursor?.cursorValue ?? "0") % Math.max(poolTraders.length, 1);
+  const rotated = [
+    ...poolTraders.slice(offset),
+    ...poolTraders.slice(0, offset),
+  ].slice(0, batch);
+
+  const watchlistTraders = await loadWatchlistTraders();
+  const traderById = new Map<string, TraderRow>();
+  for (const t of rotated) traderById.set(t.id, t);
+  for (const w of watchlistTraders) {
+    if (!traderById.has(w.id)) traderById.set(w.id, w);
+  }
+  const traders = [...traderById.values()];
+
+  const priorControls = await prisma.copyTraderControl.findMany({
+    where: { traderId: { in: traders.map((t) => t.id) } },
+    select: { traderId: true, enabled: true },
+  });
+  const priorEnabled = new Map(priorControls.map((p) => [p.traderId, p.enabled]));
+
+  let cursorMeta = (
+    await prisma.syncCursor.findUnique({
+      where: { stream: "polymarket-scan:leaderboard" },
+      select: { metadata: true },
+    })
+  )?.metadata as Record<string, unknown> | null;
+
+  const result = await evaluateTraderControls(traders, {
+    profileLimit,
+    allowScanFetch: true,
+    forceCompat: true,
+    priorEnabled,
+    cursorMeta,
+  });
+  cursorMeta = result.cursorMeta;
+
+  if (result.promoted.length > 0 || result.cooled.length > 0) {
+    await notifyBrainLeaderChange({
+      promoted: result.promoted,
+      cooled: result.cooled,
+      copyEnabled: result.copyEnabled,
+    });
+  }
+
+  for (const row of result.deprioritize) {
     cursorMeta = mergeDeprioritizedWallet(cursorMeta, row.wallet, row.reason);
   }
 
-  if (deprioritize.length > 0 || cursorMeta) {
-    await prisma.syncCursor.update({
+  if (result.deprioritize.length > 0 || cursorMeta) {
+    await prisma.syncCursor.upsert({
       where: { stream: "polymarket-scan:leaderboard" },
-      data: { metadata: (cursorMeta ?? {}) as object },
+      create: {
+        stream: "polymarket-scan:leaderboard",
+        cursorType: "metadata",
+        cursorValue: "0",
+        metadata: (cursorMeta ?? {}) as object,
+      },
+      update: { metadata: (cursorMeta ?? {}) as object },
     });
-    if (deprioritize.length > 0) {
-      console.log(`[worker] deprioritized ${deprioritize.length} low-US-overlap scan wallet(s)`);
-    }
   }
 
-  const topFails = [...failReasons.entries()]
+  const nextOffset = (offset + batch) % Math.max(poolTraders.length, 1);
+  await prisma.syncCursor.upsert({
+    where: { stream: "copy:controls-rotate" },
+    create: {
+      stream: "copy:controls-rotate",
+      cursorType: "offset",
+      cursorValue: String(nextOffset),
+    },
+    update: { cursorValue: String(nextOffset) },
+  });
+
+  const topFails = [...result.failReasons.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
     .map(([reason, count]) => ({ reason, count }));
+
+  const bestMatchedMarkets = result.bestMatchedMarkets
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 8);
+
+  const copyEnabled = await prisma.copyTraderControl.count({ where: { enabled: true } });
+
+  await saveLastSlowFunnelMeta({
+    topFails,
+    bestMatchedMarkets,
+    evaluated: traders.length,
+    usEvaluated: result.usEvaluated,
+    skippedZeroUsOverlap: result.skippedZeroUsOverlap,
+    at: new Date().toISOString(),
+  });
 
   if (traders.length > 0) {
     const topFailsLog = topFails
@@ -316,7 +550,7 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
       .map(({ reason, count }) => `${count}x ${reason}`)
       .join(" | ");
     console.log(
-      `[worker] copy trader controls refreshed pool=${pool} usGate=${gateLimit} evaluated=${traders.length} copyEnabled=${copyEnabled}${topFailsLog ? ` topFails=${topFailsLog}` : ""}`,
+      `[worker] copy trader controls SLOW batch=${batch} offset=${offset} evaluated=${traders.length} copyEnabled=${copyEnabled}${topFailsLog ? ` topFails=${topFailsLog}` : ""}`,
     );
   }
 
@@ -324,14 +558,23 @@ export async function refreshCopyTraderControls(): Promise<CopyControlsRefreshRe
     evaluated: traders.length,
     copyEnabled,
     topFails,
-    leadersByCategory,
+    leadersByCategory: result.leadersByCategory,
     sampledWallets: traders.length,
-    usEvaluated,
-    skippedZeroUsOverlap,
-    bestMatchedMarkets: bestMatchedMarkets
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 8),
+    usEvaluated: result.usEvaluated,
+    skippedZeroUsOverlap: result.skippedZeroUsOverlap,
+    bestMatchedMarkets,
   };
+}
+
+/** Keep CopyTraderControl in sync with v1 scoring gates. */
+export async function refreshCopyTraderControls(opts?: {
+  mode?: "fast" | "slow";
+}): Promise<CopyControlsRefreshResult> {
+  if (opts?.mode === "fast") return refreshCopyTraderControlsFast();
+  if (opts?.mode === "slow") return refreshCopyTraderControlsSlow();
+
+  // Legacy full sweep when mode unspecified (non-US paths).
+  return refreshCopyTraderControlsSlow();
 }
 
 function leaderCategoryBucket(
@@ -368,32 +611,37 @@ export async function loadTopCopyLeaderIds(): Promise<string[]> {
     ).map((r) => r.traderId);
   }
 
-  const scored = await Promise.all(
-    rows.slice(0, maxFullGateLeaders()).map(async (row) => {
-      const compat = await scoreTraderUsLiveCompat(row.trader.id, row.trader.address, {
-        catalogOnly: true,
-        allowScanFetch: true,
-      });
-      const profilePick = categoryLeaderPickScore(
-        {
-          buckets: [],
-          primaryBucket: null,
-          bestUsBucket: null,
-          bestUsMatch: compat.bestConfidence,
-          hasTradeableUs: compat.hasTradeableUsPosition,
-          usOverlapRatio: compat.openPositions > 0 ? compat.usCompatible / compat.openPositions : 0,
-          activeSpecialistScore: row.copyScore / 100,
-        },
-        row.copyScore,
-      );
-      return {
-        row,
-        compat,
-        pickScore: profilePick,
-        bucket: leaderCategoryBucket(row.trader.bestCategory),
-      };
-    }),
-  );
+  const scored: Array<{
+    row: (typeof rows)[number];
+    compat: Awaited<ReturnType<typeof scoreTraderUsLiveCompatCached>>;
+    pickScore: number;
+    bucket: string;
+  }> = [];
+
+  for (const row of rows.slice(0, maxFullGateLeaders())) {
+    const compat = await scoreTraderUsLiveCompatCached(row.trader.id, row.trader.address, {
+      catalogOnly: true,
+      allowScanFetch: false,
+    });
+    const profilePick = categoryLeaderPickScore(
+      {
+        buckets: [],
+        primaryBucket: null,
+        bestUsBucket: null,
+        bestUsMatch: compat.bestConfidence,
+        hasTradeableUs: compat.hasTradeableUsPosition,
+        usOverlapRatio: compat.openPositions > 0 ? compat.usCompatible / compat.openPositions : 0,
+        activeSpecialistScore: row.copyScore / 100,
+      },
+      row.copyScore,
+    );
+    scored.push({
+      row,
+      compat,
+      pickScore: profilePick,
+      bucket: leaderCategoryBucket(row.trader.bestCategory),
+    });
+  }
 
   const tradeable = scored
     .filter((r) => r.compat.hasTradeableUsPosition && r.compat.bestConfidence >= 0.9)

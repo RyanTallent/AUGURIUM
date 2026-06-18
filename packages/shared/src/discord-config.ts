@@ -48,6 +48,7 @@ export function discordChannelForEventType(eventType: string): DiscordWebhookCha
       return "PORTFOLIO_HEALTH";
     case "BRAIN_UPDATE":
     case "FUNNEL_WARNING":
+    case "DB_PRESSURE_WARNING":
     case "INVESTMENT_JOURNAL":
       return "BRAIN";
     case "RISK_ALERT":
