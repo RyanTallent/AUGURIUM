@@ -1,5 +1,12 @@
 import { prisma } from "@augurium/database";
 import { mapToSpecialtyBucket } from "@augurium/shared";
+import {
+  fetchScanWalletTrades,
+  loadLeaderWalletsForIntel,
+  loadUsCatalogSlugIndex,
+  netOpenPositionsFromScanTrades,
+  resolveScanTradeToUsMarket,
+} from "../lib/scan-us-leader-intel.js";
 
 const COPY_BATCH = Number(process.env.POSITION_SYNC_COPY_BATCH ?? "12");
 const TRADE_LIMIT = Number(process.env.US_POSITION_SYNC_TRADE_LIMIT ?? "500");
@@ -57,7 +64,7 @@ function netOpenPositions(trades: UsTradeRow[]): Array<{
     }));
 }
 
-async function syncUsPositionsForTrader(trader: { id: string; address: string }): Promise<number> {
+async function syncUsPositionsFromTrades(trader: { id: string; address: string }): Promise<number> {
   const trades = await prisma.trade.findMany({
     where: { traderId: trader.id, source: "polymarket-us" },
     orderBy: { tradedAt: "desc" },
@@ -107,9 +114,97 @@ async function syncUsPositionsForTrader(trader: { id: string; address: string })
   return synced;
 }
 
-/** Sync leader open positions from US trade history (not PolymarketScan). */
+/** Sync open positions from PolymarketScan, mapped to US catalog slugs. */
+async function syncScanUsPositionsForTrader(
+  trader: { id: string; address: string },
+  slugIndex: Awaited<ReturnType<typeof loadUsCatalogSlugIndex>>,
+): Promise<number> {
+  const trades = await fetchScanWalletTrades(trader.address);
+  const nets = netOpenPositionsFromScanTrades(trades);
+  const openKeys = new Set<string>();
+  let synced = 0;
+
+  for (const pos of nets) {
+    const sample = trades.find((t) => `${t.market}:${t.outcome}` === pos.scanKey);
+    const usMarket = await resolveScanTradeToUsMarket(
+      sample ?? {
+        market: pos.scanKey.split(":")[0] ?? pos.scanKey,
+        market_question: pos.marketQuestion,
+        event_slug: pos.eventSlug ?? undefined,
+        outcome: pos.side,
+        side: "BUY",
+        price: pos.avgPrice,
+        size: pos.size,
+        trade_timestamp: new Date().toISOString(),
+        transaction_hash: `scan:${trader.address}:${pos.scanKey}`,
+      },
+      slugIndex,
+    );
+    if (!usMarket) continue;
+
+    const key = positionExternalKey(trader.address, usMarket.slug, pos.side);
+    openKeys.add(key);
+
+    await prisma.position.upsert({
+      where: { externalKey: key },
+      create: {
+        externalKey: key,
+        traderId: trader.id,
+        marketId: usMarket.marketId,
+        conditionId: usMarket.slug,
+        asset: usMarket.slug,
+        side: pos.side,
+        size: pos.size,
+        avgPrice: pos.avgPrice,
+        pnl: 0,
+        source: "polymarket-us",
+        status: "open",
+        syncedAt: new Date(),
+      },
+      update: {
+        marketId: usMarket.marketId,
+        conditionId: usMarket.slug,
+        asset: usMarket.slug,
+        size: pos.size,
+        avgPrice: pos.avgPrice,
+        status: "open",
+        syncedAt: new Date(),
+      },
+    });
+    synced++;
+  }
+
+  if (openKeys.size > 0) {
+    await prisma.position.updateMany({
+      where: {
+        traderId: trader.id,
+        source: "polymarket-us",
+        status: "open",
+        externalKey: { notIn: [...openKeys] },
+      },
+      data: { status: "closed", syncedAt: new Date() },
+    });
+  }
+
+  return synced;
+}
+
+async function syncUsPositionsForTrader(
+  trader: { id: string; address: string },
+  slugIndex: Awaited<ReturnType<typeof loadUsCatalogSlugIndex>>,
+  preferScan: boolean,
+): Promise<number> {
+  if (preferScan) {
+    const fromScan = await syncScanUsPositionsForTrader(trader, slugIndex);
+    if (fromScan > 0) return fromScan;
+  }
+  return syncUsPositionsFromTrades(trader);
+}
+
+/** Sync leader open positions — PolymarketScan intel mapped to US catalog. */
 export async function syncPositionsFromUsData(opts?: { fastOnly?: boolean }): Promise<number> {
   const fastOnly = opts?.fastOnly === true;
+  const slugIndex = await loadUsCatalogSlugIndex();
 
   const controls = await prisma.copyTraderControl.findMany({
     where: { enabled: true },
@@ -123,10 +218,20 @@ export async function syncPositionsFromUsData(opts?: { fastOnly?: boolean }): Pr
     traderById.set(c.trader.id, c.trader);
   }
 
+  const leaderWallets = await loadLeaderWalletsForIntel();
+  for (const wallet of leaderWallets) {
+    const trader = await prisma.trader.findFirst({
+      where: { address: wallet },
+      select: { id: true, address: true },
+    });
+    if (trader) traderById.set(trader.id, trader);
+  }
+
   if (!fastOnly) {
     const candidates = await prisma.trader.findMany({
       where: {
         OR: [
+          { discoveredVia: "polymarket-scan-us-intel" },
           { discoveredVia: "polymarket-us-trades" },
           { tradeRows: { some: { source: "polymarket-us" } } },
         ],
@@ -142,7 +247,8 @@ export async function syncPositionsFromUsData(opts?: { fastOnly?: boolean }): Pr
   let synced = 0;
   for (const trader of traderById.values()) {
     try {
-      synced += await syncUsPositionsForTrader(trader);
+      const isLeader = leaderWallets.includes(trader.address.toLowerCase());
+      synced += await syncUsPositionsForTrader(trader, slugIndex, isLeader);
     } catch (err) {
       console.warn(
         `[position-sync:us] trader ${trader.address.slice(0, 10)}… failed`,
@@ -151,7 +257,9 @@ export async function syncPositionsFromUsData(opts?: { fastOnly?: boolean }): Pr
     }
   }
 
-  console.log(`[position-sync:us] mode=${fastOnly ? "fast" : "slow"} traders=${traderById.size} synced=${synced}`);
+  console.log(
+    `[position-sync:us] mode=${fastOnly ? "fast" : "slow"} traders=${traderById.size} synced=${synced} intel=polymarket-scan`,
+  );
   return synced;
 }
 

@@ -280,6 +280,7 @@ async function refreshCopyTraderControlsSlow(): Promise<CopyControlsRefreshResul
       lastScoredAt: { not: null },
       rankingScore: { gt: 0 },
       OR: [
+        { discoveredVia: "polymarket-scan-us-intel" },
         { discoveredVia: "polymarket-us-trades" },
         { tradeRows: { some: { source: "polymarket-us" } } },
       ],

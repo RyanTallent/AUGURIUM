@@ -233,6 +233,12 @@ services:
         value: polymarket-us
       - key: COPY_US_ONLY_ARCHITECTURE
         value: "true"
+      - key: COPY_US_PORTFOLIO_INGEST
+        value: "true"
+      - key: COPY_US_SEED_SCAN_INTEL
+        value: "true"
+      - key: COPY_US_SEED_WALLETS
+        value: "0x89dd49bf87c41be422927372a0b75c6ab577f662"
       - key: COPY_LIVE_MIN_LEADERS
         value: "3"
       - key: COPY_LIVE_MAX_LEADERS

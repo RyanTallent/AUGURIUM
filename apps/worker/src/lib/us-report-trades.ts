@@ -1,86 +1,42 @@
 const REPORT_BASE =
   process.env.POLYMARKET_US_REPORT_BASE ?? "https://api.prod.polymarketexchange.com";
 
-export interface UsReportTradeRow {
-  id: string;
+export interface UsMarketTradeStats {
   symbol: string;
-  aggressorAccount: string | null;
-  passiveAccount: string | null;
-  aggressorParticipant: string | null;
-  passiveParticipant: string | null;
-  price: number;
-  quantity: number;
-  transactTime: string;
+  totalTradeCount: number;
+  clearedVolume: number;
 }
 
-type RawTrade = {
-  id?: string;
-  aggressor?: { order?: { symbol?: string; account?: string; participant?: string }; lastPx?: string; lastShares?: string; transactTime?: string };
-  passive?: { order?: { symbol?: string; account?: string; participant?: string }; lastPx?: string; lastShares?: string; transactTime?: string };
-};
+/**
+ * Public exchange trade stats (aggregated — no wallet addresses).
+ * Institutional /v1/report/trades/search requires Auth0 + x-participant-id and only
+ * returns the authenticated participant's trades — not usable with retail API keys.
+ */
+export async function fetchUsMarketTradeStats(symbol: string): Promise<UsMarketTradeStats | null> {
+  const end = new Date();
+  const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-function readPx(raw: string | undefined): number {
-  if (!raw) return 0;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return n > 1 ? n / 1_000_000 : n;
-}
-
-function readQty(raw: string | undefined): number {
-  const n = Number(raw ?? 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizeWallet(account: string | null | undefined, participant: string | null | undefined): string | null {
-  const candidate = (account ?? participant ?? "").trim().toLowerCase();
-  if (!candidate) return null;
-  if (/^0x[a-f0-9]{40}$/.test(candidate)) return candidate;
-  if (candidate.length >= 8) return candidate;
-  return null;
-}
-
-export async function searchUsExchangeTrades(input: {
-  symbol: string;
-  pageSize?: number;
-  pageToken?: string;
-  startTime?: string;
-}): Promise<{ trades: UsReportTradeRow[]; nextPageToken: string | null }> {
-  const res = await fetch(`${REPORT_BASE}/v1/report/trades/search`, {
+  const res = await fetch(`${REPORT_BASE}/v1/report/trades/stats`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
-      symbol: input.symbol,
-      pageSize: input.pageSize ?? 50,
-      pageToken: input.pageToken,
-      startTime: input.startTime,
-      states: ["TRADE_STATE_CLEARED"],
+      symbol,
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
     }),
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`US report trades ${res.status}: ${text.slice(0, 200)}`);
-  }
+  if (!res.ok) return null;
 
-  const body = (await res.json()) as { trade?: RawTrade[]; nextPageToken?: string };
-  const trades: UsReportTradeRow[] = [];
+  const body = (await res.json()) as {
+    stats?: { totalTradeCount?: string; clearedVolume?: string };
+  };
+  const stats = body.stats;
+  if (!stats) return null;
 
-  for (const row of body.trade ?? []) {
-    const symbol = row.aggressor?.order?.symbol ?? row.passive?.order?.symbol ?? input.symbol;
-    const px = readPx(row.aggressor?.lastPx ?? row.passive?.lastPx);
-    const qty = readQty(row.aggressor?.lastShares ?? row.passive?.lastShares);
-    trades.push({
-      id: row.id ?? `${symbol}:${row.aggressor?.transactTime ?? Date.now()}`,
-      symbol,
-      aggressorAccount: normalizeWallet(row.aggressor?.order?.account, row.aggressor?.order?.participant),
-      passiveAccount: normalizeWallet(row.passive?.order?.account, row.passive?.order?.participant),
-      aggressorParticipant: row.aggressor?.order?.participant ?? null,
-      passiveParticipant: row.passive?.order?.participant ?? null,
-      price: px,
-      quantity: qty,
-      transactTime: row.aggressor?.transactTime ?? row.passive?.transactTime ?? new Date().toISOString(),
-    });
-  }
-
-  return { trades, nextPageToken: body.nextPageToken ?? null };
+  return {
+    symbol,
+    totalTradeCount: Number(stats.totalTradeCount ?? 0),
+    clearedVolume: Number(stats.clearedVolume ?? 0),
+  };
 }

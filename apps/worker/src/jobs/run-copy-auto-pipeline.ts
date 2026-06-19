@@ -227,7 +227,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         topFails: controls.topFails,
         variant: "no-leaders",
         nextAction:
-          "US wallet discovery + tier scoring — ensure us_trade_ingest and us_wallet_scoring are producing candidates.",
+          "US wallet discovery + tier scoring — ensure scan-based us_trade_ingest and us_wallet_scoring are producing candidates.",
       }).catch((err) => console.warn("[discord] funnel warning failed", err));
     }
 
@@ -239,7 +239,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         copyEnabled: controls.copyEnabled,
         sourcePositions: sourcePositionCount,
         nextAction:
-          "Enabled leaders lack open US positions — verify us_position_sync from US trade data.",
+          "Enabled leaders lack open US positions — verify us_position_sync maps PolymarketScan positions to US catalog slugs.",
       }).catch((err) => console.warn("[discord] no-positions funnel warning failed", err));
     }
 
