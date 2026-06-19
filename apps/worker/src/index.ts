@@ -8,7 +8,7 @@ import {
   PERIODIC_ANALYSIS_QUEUES,
   WORKER_QUEUES,
 } from "./lib/queue-scheduler.js";
-import { QUEUES, isUsBroadIntelMode, getUsCompatMinConfidence } from "@augurium/shared";
+import { QUEUES, isUsOnlyArchitecture } from "@augurium/shared";
 import { maybeAutoSeedDefaultWatchlist } from "@augurium/copy-trading";
 import { runQueueJob } from "./lib/run-queue-job.js";
 import {
@@ -141,7 +141,7 @@ async function bootstrap(): Promise<void> {
       `[worker] copy auto pipeline interval ms: ${getQueueIntervalMs(QUEUES.COPY_AUTO_PIPELINE)}`,
     );
     console.log(
-      `[worker] US broad intel: ${isUsBroadIntelMode()} (COPY_US_BROAD_INTEL=${process.env.COPY_US_BROAD_INTEL ?? "default-off"}) minConf=${getUsCompatMinConfidence()} catalog-only`,
+      `[worker] US-only architecture: ${isUsOnlyArchitecture()} — tier gates + native US market catalog`,
     );
   }
 
@@ -159,9 +159,7 @@ async function bootstrap(): Promise<void> {
   await drainRedisTriggers();
   await logPolymarketStartupCheck();
   await ensureLiveCopyDiscordOnStartup();
-  void maybeAutoSeedDefaultWatchlist().catch((err) =>
-    console.warn("[worker] watchlist auto-seed error", err instanceof Error ? err.message : err),
-  );
+  void maybeAutoSeedDefaultWatchlist().catch(() => undefined);
 
   if (COPY_PIPELINE_ENABLED) {
     console.log("[worker] running copy:auto-pipeline first (live trading priority)");

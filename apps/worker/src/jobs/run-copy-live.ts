@@ -6,7 +6,7 @@ import {
   isSourcePositionTooStale,
   canAddMarketExposure,
   leaderPositionRoi,
-  computeLiveTradeSizeUsd,
+  computeConsensusTradeSizeUsd,
   getLiveCopySizingConfig,
   sumOpenExposureUsd,
   canAddDeployedExposure,
@@ -15,13 +15,13 @@ import {
   ladderStateAfterRung,
   viewLadderState,
   buildTraderTruth,
-  evaluateCopyV1EntryGate,
-  isRoutineCopySkipReason,
+  computeUsWalletScore,
+  evaluateUsLeaderEntryGate,
+  isRoutineUsTierSkipReason,
   type CopyLiveLadderAction,
 } from "@augurium/copy-trading";
 import {
   createExecutionProvider,
-  evaluateUsCompatibilityGate,
   getExecutionConfig,
   getPolymarketUsClient,
   hasUsPositionOnMarket,
@@ -33,7 +33,6 @@ import type { ExecutionProvider } from "@augurium/execution";
 import { notifyLiveCopyTrade, notifyWeeklyStopRisk, notifyJournalDecision } from "../lib/enqueue-live-copy-discord.js";
 import { resolveLiveCopyBankroll } from "../lib/resolve-live-copy-bankroll.js";
 import { loadTopCopyLeaderIds } from "../lib/refresh-copy-trader-controls.js";
-import { usLeaderCompatRequired } from "../lib/us-leader-compat.js";
 
 type LiveMirrorRow = {
   id: string;
@@ -49,14 +48,7 @@ type LiveMirrorRow = {
 
 async function resolveMirrorUsSlug(mirror: LiveMirrorRow): Promise<string | null> {
   if (mirror.usMarketSlug?.trim()) return mirror.usMarketSlug.trim();
-  const gate = await evaluateUsCompatibilityGate({
-    globalMarketId: mirror.sourcePositionKey,
-    globalTitle: mirror.market.title,
-    globalSlug: mirror.market.slug,
-    side: mirror.side,
-    category: mirror.market.category,
-  });
-  return gate.usMarketSlug;
+  return mirror.market.slug?.trim() ?? null;
 }
 
 async function finalizeMirrorClose(
@@ -505,7 +497,8 @@ type CopyLiveSource = {
   heat?: number;
   confidence?: number;
   uncertainty?: number;
-  usMatchPct?: number;
+  leaderCount?: number;
+  marketCategory?: string | null;
   usMarketSlug?: string | null;
 };
 
@@ -522,7 +515,7 @@ async function loadCopyTargetPositions(): Promise<CopyLiveSource[]> {
   );
 
   const rows = await prisma.position.findMany({
-    where: { status: "open", traderId: { in: topIds } },
+    where: { status: "open", traderId: { in: topIds }, source: "polymarket-us" },
     select: {
       traderId: true,
       externalKey: true,
@@ -532,9 +525,16 @@ async function loadCopyTargetPositions(): Promise<CopyLiveSource[]> {
       asset: true,
       pnl: true,
       size: true,
-      market: { select: { title: true, slug: true, category: true } },
+      market: { select: { title: true, slug: true, category: true, source: true } },
     },
   });
+
+  const leadersByMarket = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const set = leadersByMarket.get(r.marketId) ?? new Set<string>();
+    set.add(r.traderId);
+    leadersByMarket.set(r.marketId, set);
+  }
 
   const mapped: CopyLiveSource[] = [];
 
@@ -542,29 +542,20 @@ async function loadCopyTargetPositions(): Promise<CopyLiveSource[]> {
     const truth = truthById.get(r.traderId);
     if (!truth) continue;
 
-    const gate = await evaluateUsCompatibilityGate({
-      globalMarketId: r.marketId,
-      globalTitle: r.market.title,
-      globalSlug: r.market.slug,
-      side: r.side,
-      category: r.market.category,
-    });
+    const usSlug = r.market.slug?.trim();
+    if (!usSlug || r.market.source !== "polymarket-us") continue;
 
-    const v1 = evaluateCopyV1EntryGate({
-      truth,
-      usMatchConfidence: gate.confidence,
+    const usScore = computeUsWalletScore({ truth, categorySpecialty: r.market.category });
+    const entry = evaluateUsLeaderEntryGate({
+      score: usScore,
       leaderPnl: r.pnl,
       leaderSize: r.size,
       leaderAvgPrice: r.avgPrice,
     });
 
-    if (!v1.pass || !gate.allowed || !gate.usMarketSlug) {
-      continue;
-    }
+    if (!entry.pass) continue;
 
-    if (usLeaderCompatRequired() && gate.confidence < 0.9) {
-      continue;
-    }
+    const leaderCount = leadersByMarket.get(r.marketId)?.size ?? 1;
 
     mapped.push({
       traderId: r.traderId,
@@ -576,14 +567,11 @@ async function loadCopyTargetPositions(): Promise<CopyLiveSource[]> {
       pnl: r.pnl,
       size: r.size,
       avgPrice: r.avgPrice,
-      conviction: v1.scores.conviction,
+      conviction: usScore.rankingScore,
       tier: truth.tier,
-      lifetime: v1.scores.lifetime,
-      heat: v1.scores.heat,
-      confidence: v1.scores.confidence,
-      uncertainty: v1.scores.uncertainty,
-      usMatchPct: v1.scores.usMatchPct,
-      usMarketSlug: gate.usMarketSlug,
+      usMarketSlug: usSlug,
+      leaderCount,
+      marketCategory: r.market.category,
     });
   }
 
@@ -669,9 +657,9 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
   let noTradeReason: string | null = null;
   if (sourcePositionCount === 0) {
     if (copyLeaderIds.length === 0) {
-      noTradeReason = "No COPY leaders enabled with US match ≥90%.";
+      noTradeReason = "No COPY leaders enabled — tier gates not met.";
     } else {
-      noTradeReason = `${copyLeaderIds.length} enabled leader(s) but zero open positions passed US catalog + v1 entry gates.`;
+      noTradeReason = `${copyLeaderIds.length} enabled leader(s) but zero open US positions passed tier entry gates.`;
     }
   }
 
@@ -687,22 +675,16 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       take: 30,
     });
     for (const mirror of retryBlocked) {
-      const gate = await evaluateUsCompatibilityGate({
-        globalMarketId: mirror.marketId,
-        globalTitle: mirror.market.title,
-        globalSlug: mirror.market.slug,
-        side: mirror.side,
-        category: mirror.market.category,
-      });
-      if (gate.allowed && gate.usMarketSlug && gate.confidence >= 0.9) {
+      const usSlug = mirror.usMarketSlug?.trim() || mirror.market.slug?.trim() || null;
+      if (usSlug) {
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
           data: {
             status: "PENDING",
             blockReason: null,
-            usMarketSlug: gate.usMarketSlug,
-            matchConfidence: gate.confidence,
-            matchReason: gate.reason,
+            usMarketSlug: usSlug,
+            matchConfidence: 1,
+            matchReason: "us-native-market",
           },
         });
       } else {
@@ -818,23 +800,25 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
     usd: r.requestedSizeUsd,
   }));
 
-  const tradeSizeUsd = computeLiveTradeSizeUsd(
+  const tradeSizeUsd = computeConsensusTradeSizeUsd(
     bankroll.bankrollUsd,
     sumOpenExposureUsd(exposureBase),
-    sizing,
-    bankroll.availableUsd,
-    75,
+    1,
+    { config: sizing, availableUsd: bankroll.availableUsd },
   );
 
   for (const src of sources) {
     const deployedNow = sumOpenExposureUsd(exposureBase);
-    const conviction = src.conviction ?? 75;
-    const sizeUsd = computeLiveTradeSizeUsd(
+    const leaderCount = src.leaderCount ?? 1;
+    const sizeUsd = computeConsensusTradeSizeUsd(
       bankroll.bankrollUsd,
       deployedNow,
-      sizing,
-      bankroll.availableUsd,
-      conviction,
+      leaderCount,
+      {
+        config: sizing,
+        availableUsd: bankroll.availableUsd,
+        sameCategory: Boolean(src.marketCategory),
+      },
     );
 
     const existing = await prisma.copyLiveMirror.findUnique({
@@ -868,7 +852,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       if (!cap.allowed) localBlock = cap.reason;
     }
 
-    if (localBlock && isRoutineCopySkipReason(localBlock)) {
+    if (localBlock && isRoutineUsTierSkipReason(localBlock)) {
       if (existing && existing.status !== "OPEN" && existing.status !== "SUBMITTED") {
         await prisma.copyLiveMirror.delete({ where: { id: existing.id } }).catch(() => undefined);
       }
@@ -964,13 +948,14 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
       const deployedNow = sumOpenExposureUsd(
         activeExposure.map((r) => ({ usd: r.requestedSizeUsd })),
       );
-      const orderSizeUsd = computeLiveTradeSizeUsd(
-        freshBankroll.bankrollUsd,
-        deployedNow - mirror.requestedSizeUsd,
-        sizing,
-        freshBankroll.availableUsd,
-        75,
-      );
+      const orderSizeUsd = mirror.requestedSizeUsd > 0
+        ? mirror.requestedSizeUsd
+        : computeConsensusTradeSizeUsd(
+            freshBankroll.bankrollUsd,
+            deployedNow - mirror.requestedSizeUsd,
+            1,
+            { config: sizing, availableUsd: freshBankroll.availableUsd },
+          );
 
       if (orderSizeUsd <= 0) {
         await prisma.copyLiveMirror.delete({ where: { id: mirror.id } }).catch(() => undefined);
@@ -984,86 +969,23 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
         });
       }
 
-      let tokenId: string | null = null;
-      let usSlugForNotify: string | null = mirror.usMarketSlug;
-      let usMatchPctNotify: number | null =
-        mirror.matchConfidence != null ? mirror.matchConfidence * 100 : null;
-
-      if (cfg.provider === "polymarket-us") {
-        const gate = await evaluateUsCompatibilityGate({
-          globalMarketId: mirror.marketId,
-          globalTitle: mirror.market.title,
-          globalSlug: mirror.market.slug,
-          side: mirror.side,
-          category: mirror.market.category,
-        });
-
-        if (!gate.allowed || !gate.usMarketSlug) {
-          const blockReason = gate.reason;
-          if (isRoutineCopySkipReason(blockReason)) {
-            await prisma.copyLiveMirror.delete({ where: { id: mirror.id } }).catch(() => undefined);
-            continue;
-          }
-          await prisma.copyLiveMirror.update({
-            where: { id: mirror.id },
-            data: {
-              status: "BLOCKED",
-              blockReason,
-              usMarketSlug: gate.usMarketSlug,
-              matchConfidence: gate.confidence,
-              matchReason: gate.reason,
-            },
-          });
-          mirrorsBlocked++;
-          await notifyLiveCopyTrade({
-            kind: "blocked",
-            mirrorId: mirror.id,
-            marketTitle: mirror.market.title,
-            side: mirror.side,
-            sizeUsd: orderSizeUsd,
-            entryPrice: mirror.entryPrice,
-            traderAddress: mirror.trader.address,
-            blockReason,
-          });
-          continue;
-        }
-
-        tokenId = gate.usMarketSlug;
-        usSlugForNotify = gate.usMarketSlug;
-        usMatchPctNotify = gate.confidence * 100;
+      const usSlug = mirror.usMarketSlug?.trim() || mirror.market.slug?.trim() || null;
+      if (!usSlug) {
         await prisma.copyLiveMirror.update({
           where: { id: mirror.id },
-          data: {
-            usMarketSlug: gate.usMarketSlug,
-            matchConfidence: gate.confidence,
-            matchReason: gate.reason,
-          },
+          data: { status: "BLOCKED", blockReason: "no US market slug" },
         });
-      } else {
-        const pos = await prisma.position.findUnique({
-          where: { externalKey: mirror.sourcePositionKey },
-          select: { asset: true },
-        });
-        tokenId = pos?.asset ?? mirror.market.clobTokenIds?.[0] ?? null;
-        if (!tokenId) {
-          await prisma.copyLiveMirror.update({
-            where: { id: mirror.id },
-            data: { status: "BLOCKED", blockReason: "no CLOB token id for market" },
-          });
-          mirrorsBlocked++;
-          await notifyLiveCopyTrade({
-            kind: "blocked",
-            mirrorId: mirror.id,
-            marketTitle: mirror.market.title,
-            side: mirror.side,
-            sizeUsd: orderSizeUsd,
-            entryPrice: mirror.entryPrice,
-            traderAddress: mirror.trader.address,
-            blockReason: "no CLOB token id for market",
-          });
-          continue;
-        }
+        mirrorsBlocked++;
+        continue;
       }
+
+      await prisma.copyLiveMirror.update({
+        where: { id: mirror.id },
+        data: { usMarketSlug: usSlug, matchConfidence: 1, matchReason: "us-native-market" },
+      });
+
+      const tokenId = usSlug;
+      const usSlugForNotify = usSlug;
 
       const result = await provider.placeOrder({
         idempotencyKey: `copy-live:${mirror.sourcePositionKey}`,
@@ -1107,7 +1029,7 @@ export async function runCopyLiveJob(): Promise<CopyLiveJobSummary> {
           traderAddress: mirror.trader.address,
           providerOrderId: result.providerOrderId ?? null,
           usMarketSlug: usSlugForNotify,
-          usMatchPct: usMatchPctNotify,
+          usMatchPct: 100,
           reason: "verified EXECUTED fill",
         });
         await notifyJournalDecision({

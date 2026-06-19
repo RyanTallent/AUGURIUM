@@ -1,51 +1,37 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getUsCompatMinConfidence, isUsBroadIntelMode } from "./us-copy-mode.js";
+import { isUsBroadIntelMode, isUsOnlyArchitecture, usePolymarketScanIntel } from "./us-copy-mode.js";
 
-describe("getUsCompatMinConfidence", () => {
-  const usLiveEnv = {
-    EXECUTION_PROVIDER: "polymarket-us",
-    LIVE_COPY_ENABLED: "true",
-  };
+const usLiveEnv = {
+  EXECUTION_PROVIDER: "polymarket-us",
+  LIVE_COPY_ENABLED: "true",
+};
 
-  it("defaults to 0.9", () => {
-    assert.equal(getUsCompatMinConfidence(usLiveEnv), 0.9);
+describe("isUsOnlyArchitecture", () => {
+  it("defaults on for US live copy", () => {
+    assert.equal(isUsOnlyArchitecture(usLiveEnv), true);
   });
 
-  it("honors US_COMPAT_MIN_CONFIDENCE even when broad intel is on", () => {
+  it("can be disabled explicitly", () => {
     assert.equal(
-      getUsCompatMinConfidence({ ...usLiveEnv, COPY_US_BROAD_INTEL: "true", US_COMPAT_MIN_CONFIDENCE: "0.90" }),
-      0.9,
-    );
-  });
-
-  it("honors explicit lower thresholds when set", () => {
-    assert.equal(
-      getUsCompatMinConfidence({ ...usLiveEnv, US_COMPAT_MIN_CONFIDENCE: "0.85" }),
-      0.85,
+      isUsOnlyArchitecture({ ...usLiveEnv, COPY_US_ONLY_ARCHITECTURE: "false" }),
+      false,
     );
   });
 });
 
-describe("isUsBroadIntelMode", () => {
+describe("usePolymarketScanIntel", () => {
   it("defaults off for US live copy", () => {
-    assert.equal(
-      isUsBroadIntelMode({
-        EXECUTION_PROVIDER: "polymarket-us",
-        LIVE_COPY_ENABLED: "true",
-      }),
-      false,
-    );
+    assert.equal(usePolymarketScanIntel(usLiveEnv), false);
   });
 
   it("enabled only when explicitly set", () => {
-    assert.equal(
-      isUsBroadIntelMode({
-        EXECUTION_PROVIDER: "polymarket-us",
-        LIVE_COPY_ENABLED: "true",
-        COPY_US_BROAD_INTEL: "true",
-      }),
-      true,
-    );
+    assert.equal(usePolymarketScanIntel({ ...usLiveEnv, COPY_INTEL_SOURCE: "polymarketscan" }), true);
+  });
+});
+
+describe("isUsBroadIntelMode", () => {
+  it("defaults off under US-only architecture", () => {
+    assert.equal(isUsBroadIntelMode(usLiveEnv), false);
   });
 });

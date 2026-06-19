@@ -1,16 +1,26 @@
-/** US-only live copy: Polymarket US execution with PolymarketScan intelligence. */
+/** US-only live copy: Polymarket US execution — all markets are native US. */
 export function isUsOnlyLiveCopyMode(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
   return env.EXECUTION_PROVIDER === "polymarket-us" && env.LIVE_COPY_ENABLED === "true";
 }
 
-/** Intelligence from PolymarketScan API (not global wallet master / holder scan). */
+/** True when running the US-only architecture (default for US live copy). */
+export function isUsOnlyArchitecture(
+  env: Record<string, string | undefined> = globalThis.process?.env ?? {},
+): boolean {
+  if (env.COPY_US_ONLY_ARCHITECTURE === "false") return false;
+  return isUsOnlyLiveCopyMode(env);
+}
+
+/**
+ * @deprecated PolymarketScan is no longer the primary intel source.
+ * Only enabled when explicitly set via COPY_INTEL_SOURCE=polymarketscan.
+ */
 export function usePolymarketScanIntel(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
-  if (env.COPY_INTEL_SOURCE === "polymarketscan") return true;
-  return isUsOnlyLiveCopyMode(env);
+  return env.COPY_INTEL_SOURCE === "polymarketscan";
 }
 
 export function requirePolymarketUsForLiveCopy(
@@ -26,7 +36,7 @@ export function requirePolymarketUsForLiveCopy(
   return { ok: true };
 }
 
-/** Strict US catalog match threshold — default 0.90, never lowered by broad intel. */
+/** @deprecated US compatibility scoring removed — all catalog markets are US-native. */
 export function getUsCompatMinConfidence(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): number {
@@ -35,17 +45,17 @@ export function getUsCompatMinConfidence(
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  return 0.9;
+  return 1;
 }
 
-/** Global slug translation on US — disabled unless explicitly enabled (default off). */
+/** @deprecated */
 export function shouldTryGlobalSlugOnUs(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
   return env.US_COMPAT_TRY_GLOBAL_SLUG === "true";
 }
 
-/** Relaxed slug matching — disabled unless explicitly enabled (default off). */
+/** @deprecated */
 export function shouldRelaxUsSlugMatch(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
@@ -53,17 +63,13 @@ export function shouldRelaxUsSlugMatch(
 }
 
 /**
- * Broad intel path (global trade ingest, score-traders, rising wallets).
- * Default OFF — opt in with COPY_US_BROAD_INTEL=true.
+ * @deprecated Global broad intel path disabled in US-only architecture.
  */
 export function isUsBroadIntelMode(
   env: Record<string, string | undefined> = globalThis.process?.env ?? {},
 ): boolean {
-  if (env.COPY_US_BROAD_INTEL === "false" || env.COPY_US_BROAD_INTEL === "0") {
-    return false;
-  }
-  if (env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1") {
-    return true;
+  if (!isUsOnlyArchitecture(env)) {
+    return env.COPY_US_BROAD_INTEL === "true" || env.COPY_US_BROAD_INTEL === "1";
   }
   return false;
 }

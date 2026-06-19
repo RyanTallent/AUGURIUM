@@ -1,6 +1,7 @@
 import { prisma } from "@augurium/database";
 import type { Prisma } from "@augurium/database";
 import { getPolymarketUsPublicClient } from "@augurium/execution";
+import { mapToSpecialtyBucket } from "@augurium/shared";
 import {
   advanceCursor,
   getOrCreateCursor,
@@ -9,14 +10,9 @@ import {
 } from "../lib/ingestion-store.js";
 
 const STREAM = "polymarket-us:markets:catalog";
-const SEARCH_QUERIES = (
-  process.env.US_MARKET_CATALOG_QUERIES ??
-  "mlb,nba,nfl,nhl,wnba,ufc,boxing,golf,tennis,world cup,mls,motorsports,cws,esports,valorant,cs2,dota,politics,econ,tech,culture,temp,weather"
-).split(",");
-const MARKETS_PER_QUERY = Number(process.env.US_MARKET_CATALOG_LIMIT_PER_QUERY ?? "40");
-const WARM_MIN = Number(process.env.US_MARKET_CATALOG_WARM_MIN ?? "3000");
-const MAX_UPSERTS = Number(process.env.US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN ?? "80");
-const UPSERT_CHUNK = Number(process.env.US_MARKET_CATALOG_UPSERT_CHUNK ?? "20");
+const PAGE_SIZE = Number(process.env.US_MARKET_CATALOG_PAGE_SIZE ?? "100");
+const MAX_UPSERTS = Number(process.env.US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN ?? "120");
+const UPSERT_CHUNK = Number(process.env.US_MARKET_CATALOG_UPSERT_CHUNK ?? "25");
 
 function readMarketTitle(market: {
   title?: string;
@@ -65,85 +61,67 @@ async function upsertCatalogChunk(rows: CatalogRow[]): Promise<number> {
   return rows.length;
 }
 
+/** Scan ALL active Polymarket US markets — continuous paginated refresh, no category exclusions. */
 export async function ingestUsMarketCatalog(): Promise<number> {
-  await getOrCreateCursor(STREAM, "query-index");
+  await getOrCreateCursor(STREAM, "offset");
   await markCursorRunning(STREAM);
 
   const cursor = await prisma.syncCursor.findUniqueOrThrow({ where: { stream: STREAM } });
-  const queryIndex = Number.parseInt(cursor.cursorValue, 10) || 0;
-  const query = SEARCH_QUERIES[queryIndex % SEARCH_QUERIES.length]?.trim();
-  const nextIndex = (queryIndex + 1) % SEARCH_QUERIES.length;
-
-  if (!query) {
-    await advanceCursor(STREAM, "0", { resetReason: "no-queries" });
-    return 0;
-  }
-
-  const warmCount = await prisma.market.count({
-    where: { source: "polymarket-us", active: true },
-  });
-  if (warmCount >= WARM_MIN) {
-    await advanceCursor(STREAM, String(nextIndex), {
-      lastQuery: query,
-      upserted: 0,
-      warmSkip: true,
-      catalogCount: warmCount,
-    } as Prisma.InputJsonValue);
-    console.log(
-      `[us-market-catalog] warm skip catalogCount=${warmCount} nextIndex=${nextIndex}`,
-    );
-    return 0;
-  }
+  const offset = Number.parseInt(cursor.cursorValue, 10) || 0;
 
   const client = getPolymarketUsPublicClient();
   let upserted = 0;
 
   try {
-    const search = await client.search.query({
-      query,
-      limit: MARKETS_PER_QUERY,
-      status: "active",
+    const page = await client.markets.list({
+      active: true,
+      closed: false,
+      limit: PAGE_SIZE,
+      offset,
     });
-    await storeRawPayload("polymarket-us", `search?query=${query}`, search);
+    await storeRawPayload("polymarket-us", `markets/list?offset=${offset}`, page);
 
     const pending: CatalogRow[] = [];
-    for (const event of search.events ?? []) {
-      for (const market of event.markets ?? []) {
-        if (!market.slug || market.closed || !market.active) continue;
-        const title = readMarketTitle(market);
-        if (!title) continue;
+    for (const market of page.markets ?? []) {
+      if (!market.slug || market.closed || !market.active) continue;
+      const title = readMarketTitle(market);
+      if (!title) continue;
 
-        pending.push({
-          externalId: `us:${market.slug}`,
-          title,
-          slug: market.slug,
-          category: (event as { category?: string }).category ?? undefined,
-          eventSlug: event.slug ?? null,
-        });
+      pending.push({
+        externalId: `us:${market.slug}`,
+        title,
+        slug: market.slug,
+        category: mapToSpecialtyBucket({ title, slug: market.slug }),
+        eventSlug: market.eventSlug ?? null,
+      });
 
-        if (pending.length >= UPSERT_CHUNK) {
-          upserted += await upsertCatalogChunk(pending.splice(0, pending.length));
-          if (upserted >= MAX_UPSERTS) break;
-        }
+      if (pending.length >= UPSERT_CHUNK) {
+        upserted += await upsertCatalogChunk(pending.splice(0, pending.length));
+        if (upserted >= MAX_UPSERTS) break;
       }
-      if (upserted >= MAX_UPSERTS) break;
     }
 
     if (upserted < MAX_UPSERTS && pending.length > 0) {
       const room = MAX_UPSERTS - upserted;
       upserted += await upsertCatalogChunk(pending.slice(0, room));
     }
+
+    const pageCount = page.markets?.length ?? 0;
+    const nextOffset = pageCount < PAGE_SIZE ? 0 : offset + PAGE_SIZE;
+
+    await advanceCursor(STREAM, String(nextOffset), {
+      upserted,
+      offset,
+      nextOffset,
+      pageCount,
+    } as Prisma.InputJsonValue);
+
+    console.log(`[us-market-catalog] offset=${offset} upserted=${upserted} nextOffset=${nextOffset}`);
+    return upserted;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[us-market-catalog] search failed query=${query}: ${message}`);
+    console.warn(`[us-market-catalog] list failed offset=${offset}: ${message}`);
+    await advanceCursor(STREAM, String(offset), { upserted: 0, error: message } as Prisma.InputJsonValue);
+    return 0;
   }
-
-  await advanceCursor(STREAM, String(nextIndex), {
-    lastQuery: query,
-    upserted,
-    catalogCount: warmCount + upserted,
-  } as Prisma.InputJsonValue);
-
-  console.log(`[us-market-catalog] query=${query} upserted=${upserted} nextIndex=${nextIndex}`);
-  return upserted;
 }

@@ -45,8 +45,8 @@ export async function notifyWorkerOnline(input: {
     },
     { name: "Scan interval", value: `${scanSec}s`, inline: true },
     {
-      name: "US match floor",
-      value: "≥90% (catalog-only)",
+      name: "Leader tiers",
+      value: "Rising Star / Established",
       inline: true,
     },
   ];
@@ -183,15 +183,15 @@ export async function notifyNoEligibleLeaders(input: {
   await sendOpsEvent({
     eventType: "BRAIN_UPDATE",
     dedupeKey: `ops:no-leaders:${dayKey}`,
-    title: "No US-overlap leaders",
+    title: "No eligible leaders",
     payload: buildBrainUpdateEmbed({
       title: "Live system scanning — no eligible leaders",
       message:
-        "Live system is scanning, but no leaders currently pass US-overlap gates (≥90% catalog match required).",
+        "Live system is scanning US wallets, but no leaders currently pass Rising Star / Established tier gates.",
       fields: [
-        { name: "US evaluated", value: String(input.usEvaluated), inline: true },
+        { name: "Wallets evaluated", value: String(input.usEvaluated), inline: true },
         {
-          name: "Zero-overlap skips",
+          name: "Tier failures",
           value: String(input.skippedZeroUsOverlap),
           inline: true,
         },

@@ -1,16 +1,10 @@
 import { prisma } from "@augurium/database";
-import { detectRisingWallets } from "@augurium/copy-trading";
-import { isUsOnlyLiveCopyMode, isUsBroadIntelMode, usePolymarketScanIntel } from "@augurium/shared";
-import { ingestGlobalTrades } from "./ingest-trades.js";
-import { discoverWalletsFromHolders } from "./discover-wallets.js";
-import { ingestWalletActivityForCopyTargets } from "./ingest-wallet-activity.js";
-import { ingestPolymarketScanLeaders } from "./ingest-polymarket-scan.js";
+import { isUsOnlyArchitecture } from "@augurium/shared";
 import { ingestUsMarketCatalog } from "./ingest-us-market-catalog.js";
-import { runScoreTradersJob } from "./score-traders.js";
-import { syncPositionsFromApi } from "./sync-positions.js";
-import { syncPositionsForCopyTargetsFirst } from "./sync-positions-copy-priority.js";
-import { syncPositionsFromPolymarketScan } from "./sync-positions-polymarket-scan.js";
-import { runCopyPaperJob } from "./run-copy-paper.js";
+import { ingestUsTrades } from "./ingest-us-trades.js";
+import { discoverUsWallets } from "./discover-us-wallets.js";
+import { runUsWalletScoringJob } from "./run-us-wallet-scoring.js";
+import { syncPositionsFromUsData } from "./sync-positions-us.js";
 import { runCopyLiveJob } from "./run-copy-live.js";
 import { runPortfolioHealthReportJob } from "./run-portfolio-health-report.js";
 import { notifyLiveCopyProblem } from "../lib/enqueue-live-copy-discord.js";
@@ -30,8 +24,6 @@ import {
 import { isDbPressureError } from "../lib/db-pressure.js";
 
 const ENABLED = process.env.COPY_AUTO_PIPELINE_ENABLED === "true";
-const INCLUDE_WALLET_ACTIVITY =
-  process.env.COPY_AUTO_INCLUDE_WALLET_ACTIVITY !== "false";
 const PAPER_COPY_ENABLED = process.env.PAPER_COPY_ENABLED === "true";
 
 export interface CopyAutoPipelineSummary {
@@ -51,15 +43,6 @@ export interface CopyAutoPipelineSummary {
   mirrorsSubmitted: number;
   message: string;
 }
-
-function useLiteLivePath(): boolean {
-  if (process.env.COPY_AUTO_SKIP_HEAVY_INGEST === "false") return false;
-  return process.env.LIVE_COPY_ENABLED === "true" && !PAPER_COPY_ENABLED;
-}
-
-const INCLUDE_WALLET_DISCOVER = process.env.COPY_AUTO_INCLUDE_WALLET_DISCOVER === "true";
-const INCLUDE_GENERAL_POSITION_SYNC =
-  process.env.COPY_AUTO_SYNC_GENERAL_POSITIONS !== "false";
 
 async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   const started = Date.now();
@@ -85,7 +68,7 @@ async function pipelineStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Every ~3 min (configurable): PolymarketScan → score COPY wallets → sync → verified live buy/sell. */
+/** US-only copy pipeline: catalog → trades → wallets → scoring → positions → tiers → live copy. */
 export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary> {
   const started = Date.now();
 
@@ -109,19 +92,15 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
     };
   }
 
-  const scanIntel = usePolymarketScanIntel();
-  const usMode = scanIntel || isUsOnlyLiveCopyMode();
-  const broadIntel = usMode && isUsBroadIntelMode();
-  const lite = useLiteLivePath() && !broadIntel;
-  const usLite = usMode && !broadIntel;
-  const cycleMode = usLite ? await resolvePipelineCycleMode() : "slow";
+  const usOnly = isUsOnlyArchitecture();
+  const cycleMode = usOnly ? await resolvePipelineCycleMode() : "slow";
   const isSlowCycle = cycleMode === "slow";
   const run = await prisma.ingestionRun.create({
     data: { source: "copy:auto-pipeline", status: "running" },
   });
 
   console.log(
-    `[worker] copy:auto-pipeline started mode=${lite ? "lite-live" : "full"} usOnly=${usMode} broadIntel=${broadIntel} cycle=${cycleMode} slowMs=${slowDiscoveryIntervalMs()}`,
+    `[worker] copy:auto-pipeline started usOnly=${usOnly} cycle=${cycleMode} slowMs=${slowDiscoveryIntervalMs()}`,
   );
 
   let tradesIngested = 0;
@@ -137,105 +116,32 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
   let mirrorsSubmitted = 0;
 
   try {
-    if (usMode) {
-      if (isSlowCycle) {
-        walletsDiscovered = await pipelineStep("polymarket_scan_leaders", ingestPolymarketScanLeaders);
-        await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
-      } else {
-        console.log("[worker] copy:auto-pipeline fast cycle — skip scan ingest + US catalog refresh");
-      }
-      if (broadIntel) {
-        if (INCLUDE_WALLET_DISCOVER) {
-          walletsDiscovered += await pipelineStep("wallet_discover", discoverWalletsFromHolders);
-        }
-        if (INCLUDE_WALLET_ACTIVITY) {
-          walletActivityIngested = await pipelineStep(
-            "wallet_activity",
-            ingestWalletActivityForCopyTargets,
-          );
-        }
-      } else if (!isSlowCycle) {
-        console.log("[worker] copy:auto-pipeline US fast — skip global trade ingest and wallet discover");
-      } else {
-        console.log("[worker] copy:auto-pipeline US slow — skip global trade ingest and wallet discover");
-      }
-    } else if (!lite) {
-      tradesIngested = await pipelineStep("trade_ingest", ingestGlobalTrades);
-      walletsDiscovered = await pipelineStep("wallet_discover", discoverWalletsFromHolders);
-    } else {
-      console.log(
-        "[worker] copy:auto-pipeline lite-live — skip global trade ingest (trade:ingest queue handles it)",
-      );
-      if (INCLUDE_WALLET_DISCOVER) {
-        walletsDiscovered = await pipelineStep("wallet_discover", discoverWalletsFromHolders);
-      }
+    if (!usOnly) {
+      throw new Error("COPY_AUTO_PIPELINE requires US-only architecture (EXECUTION_PROVIDER=polymarket-us)");
     }
 
-    if (!usMode && INCLUDE_WALLET_ACTIVITY) {
-      walletActivityIngested = await pipelineStep(
-        "wallet_activity",
-        ingestWalletActivityForCopyTargets,
-      );
-    }
+    await pipelineStep("us_market_catalog", ingestUsMarketCatalog);
+    tradesIngested = await pipelineStep("us_trade_ingest", ingestUsTrades);
+    walletsDiscovered = await pipelineStep("us_wallet_discover", discoverUsWallets);
 
-    if (!usMode || broadIntel) {
-      const score = await pipelineStep("score_traders", runScoreTradersJob);
-      tradersScored = score.scored;
-    } else {
-      console.log("[worker] copy:auto-pipeline US mode — trader scores from PolymarketScan ingest");
-    }
+    const score = await pipelineStep("us_wallet_scoring", runUsWalletScoringJob);
+    tradersScored = score.scored;
 
-    if (usMode && !broadIntel) {
-      positionsSynced = await pipelineStep("position_sync_scan", () =>
-        syncPositionsFromPolymarketScan({ fastOnly: !isSlowCycle }),
-      );
-    }
+    positionsSynced = await pipelineStep("us_position_sync", () =>
+      syncPositionsFromUsData({ fastOnly: !isSlowCycle }),
+    );
 
-    const controls = await pipelineStep("copy_trader_controls", () =>
-      refreshCopyTraderControls({ mode: usLite ? cycleMode : "slow" }),
+    const controls = await pipelineStep("us_leader_controls", () =>
+      refreshCopyTraderControls({ mode: cycleMode }),
     );
     console.log(
       `[worker] copy:auto-pipeline copyTraderControl evaluated=${controls.evaluated} enabled=${controls.copyEnabled}`,
     );
 
     await pipelineStep("rising_wallets", async () => {
-      if (usMode && !broadIntel) {
-        console.log("[worker] copy:auto-pipeline US mode — skip rising_wallets");
-        return 0;
-      }
-      const hits = await detectRisingWallets(Number(process.env.COPY_RISING_WALLET_LIMIT ?? "25"));
-      return hits.length;
+      console.log("[worker] copy:auto-pipeline US-only — skip rising_wallets");
+      return 0;
     });
-
-    if (usMode && broadIntel) {
-      positionsSynced = await pipelineStep("position_sync_scan", syncPositionsFromPolymarketScan);
-      positionsSynced += await pipelineStep(
-        "position_sync_copy",
-        syncPositionsForCopyTargetsFirst,
-      );
-    } else if (usMode && !broadIntel) {
-      // position_sync_scan already ran before copy_trader_controls
-    } else if (lite) {
-      positionsSynced = await pipelineStep(
-        "position_sync_copy",
-        syncPositionsForCopyTargetsFirst,
-      );
-      if (INCLUDE_GENERAL_POSITION_SYNC) {
-        positionsSynced += await pipelineStep("position_sync", syncPositionsFromApi);
-      }
-    } else {
-      positionsSynced = await pipelineStep("position_sync", async () => {
-        const copySync = await syncPositionsForCopyTargetsFirst();
-        return copySync + (await syncPositionsFromApi());
-      });
-    }
-
-    if (PAPER_COPY_ENABLED) {
-      const paper = await pipelineStep("paper_copy", runCopyPaperJob);
-      paperCopyEnabled = paper.copyEnabled;
-      paperOpened = paper.opened;
-      paperClosed = paper.closed;
-    }
 
     const live = await pipelineStep("live_copy", runCopyLiveJob);
     liveReady = live.ready;
@@ -244,18 +150,18 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
 
     await pipelineStep("portfolio_health", runPortfolioHealthReportJob);
 
-    if (usLite && isSlowCycle) {
+    if (usOnly && isSlowCycle) {
       await markSlowDiscoveryCompleted();
     }
 
-    const message = `auto copy: cycle=${cycleMode} trades=${tradesIngested} scanWallets=${walletsDiscovered} walletAct=${walletActivityIngested} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
+    const message = `auto copy: cycle=${cycleMode} usTrades=${tradesIngested} wallets=${walletsDiscovered} scored=${tradersScored} COPY=${controls.copyEnabled} liveReady=${liveReady} liveBlocked=${liveMirrorsBlocked} submitted=${mirrorsSubmitted}`;
 
     const noTradeReason =
       mirrorsSubmitted === 0
         ? (live as { noTradeReason?: string | null }).noTradeReason ??
           (controls.copyEnabled === 0
             ? `No COPY leaders enabled — dominant blocker: ${controls.topFails[0]?.reason ?? "unknown"}`
-            : `No source positions passed US entry gates (sourcePositions=${(live as { sourcePositionCount?: number }).sourcePositionCount ?? 0})`)
+            : `No source positions passed US tier entry gates (sourcePositions=${(live as { sourcePositionCount?: number }).sourcePositionCount ?? 0})`)
         : null;
 
     const funnelStreak = recordCopyEnabledStreak(controls.copyEnabled);
@@ -271,8 +177,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         itemCount: tradersScored + paperOpened + mirrorsSubmitted,
         metadata: {
           cycleMode,
-          usMode,
-          lite,
+          usOnly,
           tradesIngested,
           walletsDiscovered,
           walletActivityIngested,
@@ -322,7 +227,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         topFails: controls.topFails,
         variant: "no-leaders",
         nextAction:
-          "Slow-cycle category discovery, US-catalog overlap search, and watchlist seeding for politics/sports/econ wallets.",
+          "US wallet discovery + tier scoring — ensure us_trade_ingest and us_wallet_scoring are producing candidates.",
       }).catch((err) => console.warn("[discord] funnel warning failed", err));
     }
 
@@ -334,7 +239,7 @@ export async function runCopyAutoPipelineJob(): Promise<CopyAutoPipelineSummary>
         copyEnabled: controls.copyEnabled,
         sourcePositions: sourcePositionCount,
         nextAction:
-          "Enabled leaders lack US-catalog open positions — position sync + watchlist overlap wallets; waiting for valid ≥90% match.",
+          "Enabled leaders lack open US positions — verify us_position_sync from US trade data.",
       }).catch((err) => console.warn("[discord] no-positions funnel warning failed", err));
     }
 

@@ -23,8 +23,6 @@ envVarGroups:
         value: production
       - key: NODE_VERSION
         value: "22.12.0"
-      - key: POLYMARKET_GAMMA_BASE
-        value: https://gamma-api.polymarket.com
       - key: POLYMARKET_DATA_BASE
         value: https://data-api.polymarket.com
       - key: WORKER_POLL_INTERVAL_MS
@@ -88,9 +86,7 @@ envVarGroups:
       - key: COPY_MAX_CAPITAL_PER_MARKET_PCT
         value: "0.20"
       - key: COPY_INTEL_SOURCE
-        value: polymarketscan
-      - key: US_COMPAT_MIN_CONFIDENCE
-        value: "0.90"
+        value: polymarket-us
       - key: COPY_MAX_SOURCE_ROI_TO_MIRROR
         value: "0.20"
       - key: COPY_LIVE_ORDER_TYPE
@@ -223,16 +219,10 @@ services:
         value: "60"
       - key: INGEST_STORE_RAW_PAYLOAD
         value: "false"
-      - key: POLYMARKET_SCAN_WALLET_BATCH
-        value: "12"
-      - key: POLYMARKET_SCAN_WHALE_LIMIT
+      - key: US_MARKET_CATALOG_PAGE_SIZE
         value: "100"
-      - key: US_MARKET_CATALOG_WARM_MIN
-        value: "3000"
-      - key: US_MARKET_CATALOG_QUERIES
-        value: "mlb,nba,nfl,nhl,soccer,esports,valorant,cs2,dota,politics,weather,temperature,highest"
       - key: US_MARKET_CATALOG_MAX_UPSERTS_PER_RUN
-        value: "80"
+        value: "120"
       - key: COPY_AUTO_PIPELINE_ENABLED
         value: "true"
       - key: PAPER_COPY_ENABLED
@@ -240,25 +230,13 @@ services:
       - key: WORKER_INTERVAL_COPY_AUTO_PIPELINE_MS
         value: "180000"
       - key: COPY_INTEL_SOURCE
-        value: polymarketscan
-      - key: US_COMPAT_MIN_CONFIDENCE
-        value: "0.90"
-      - key: US_COMPAT_TRY_GLOBAL_SLUG
-        value: "false"
-      - key: US_COMPAT_RELAXED_SLUG
-        value: "false"
-      - key: COPY_US_BROAD_INTEL
-        value: "false"
-      - key: COPY_US_REQUIRE_COMPAT_POSITION
+        value: polymarket-us
+      - key: COPY_US_ONLY_ARCHITECTURE
         value: "true"
-      - key: COPY_AUTO_INCLUDE_WALLET_DISCOVER
-        value: "true"
-      - key: COPY_AUTO_INCLUDE_WALLET_ACTIVITY
-        value: "true"
-      - key: COPY_LIVE_MAX_LEADERS
-        value: "15"
       - key: COPY_LIVE_MIN_LEADERS
-        value: "5"
+        value: "3"
+      - key: COPY_LIVE_MAX_LEADERS
+        value: "25"
       - key: COPY_LIVE_CANDIDATE_POOL
         value: "500"
       - key: COPY_AUTO_SYNC_GENERAL_POSITIONS
@@ -275,12 +253,6 @@ services:
         value: "15"
       - key: COPY_FAST_CONTROLS_MAX
         value: "12"
-      - key: COPY_US_COMPAT_CACHE_MS
-        value: "1800000"
-      - key: US_CATALOG_MATCH_CACHE_MS
-        value: "3600000"
-      - key: COPY_CATEGORY_PROFILE_BATCH
-        value: "8"
       - key: COPY_RISING_WALLET_LIMIT
         value: "40"
       - key: LIVE_COPY_ENABLED

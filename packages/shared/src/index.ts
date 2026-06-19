@@ -139,7 +139,7 @@ export {
   type DiscordEnvConfig,
   type DiscordWebhookChannel,
 } from "./discord-config.js";
-export { isUsOnlyLiveCopyMode, usePolymarketScanIntel, requirePolymarketUsForLiveCopy, isUsBroadIntelMode, getUsCompatMinConfidence, shouldTryGlobalSlugOnUs, shouldRelaxUsSlugMatch } from "./us-copy-mode.js";
+export { isUsOnlyLiveCopyMode, isUsOnlyArchitecture, usePolymarketScanIntel, requirePolymarketUsForLiveCopy, isUsBroadIntelMode, getUsCompatMinConfidence, shouldTryGlobalSlugOnUs, shouldRelaxUsSlugMatch } from "./us-copy-mode.js";
 export {
   SPECIALTY_BUCKETS,
   US_POLYGON_CATEGORY_SLUGS,

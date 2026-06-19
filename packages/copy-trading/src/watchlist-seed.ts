@@ -477,63 +477,7 @@ export async function seedUsLeaderWatchlistWallet(input: {
   };
 }
 
-/** Auto-seed verified MLB wallet when watchlist is empty (worker startup). */
+/** Auto-seed disabled — watchlist is optional admin-only, not a pipeline dependency. */
 export async function maybeAutoSeedDefaultWatchlist(): Promise<WatchlistSeedResult | null> {
-  const enabledCount = await prisma.usLeaderWatchlist.count({ where: { enabled: true } });
-  if (enabledCount > 0) {
-    return null;
-  }
-
-  const wallet = DEFAULT_MLB_WATCHLIST_SEED.wallet.toLowerCase();
-  const existing = await prisma.usLeaderWatchlist.findUnique({ where: { wallet } });
-  if (existing) {
-    return null;
-  }
-
-  const traderId = await ingestWatchlistWalletFromScan(wallet);
-  const positionsSynced = await syncPositionsFromPolymarketScanForTrader({
-    id: traderId,
-    address: wallet,
-  });
-  const usMatchConfidence = await scoreWatchlistUsCatalogMatch(traderId);
-  const minUsMatch = getCopyV1Thresholds().minUsMatch;
-
-  if (usMatchConfidence < minUsMatch) {
-    console.log(
-      `[watchlist-seed] auto-seed skipped wallet=${wallet.slice(0, 10)}… usMatch=${(usMatchConfidence * 100).toFixed(0)}% < ${minUsMatch * 100}%`,
-    );
-    return {
-      wallet,
-      watchlistId: null,
-      metricsFound: true,
-      positionsSynced,
-      usMatchConfidence,
-      leaderGatesPass: false,
-      gateReasons: [`US match ${(usMatchConfidence * 100).toFixed(0)}% < ${minUsMatch * 100}%`],
-      skipped: true,
-      skipReason: "us_match_below_threshold",
-    };
-  }
-
-  const row = await prisma.usLeaderWatchlist.create({
-    data: {
-      wallet,
-      enabled: true,
-      notes: DEFAULT_MLB_WATCHLIST_SEED.notes,
-    },
-  });
-  const gateEval = await evaluateLeaderGates(traderId, usMatchConfidence);
-  console.log(
-    `[watchlist-seed] auto-seed added wallet=${wallet.slice(0, 10)}… usMatch=${(usMatchConfidence * 100).toFixed(0)}% gates=${gateEval.pass ? "pass" : "fail"}`,
-  );
-
-  return {
-    wallet,
-    watchlistId: row.id,
-    metricsFound: true,
-    positionsSynced,
-    usMatchConfidence,
-    leaderGatesPass: gateEval.pass,
-    gateReasons: gateEval.reasons,
-  };
+  return null;
 }
